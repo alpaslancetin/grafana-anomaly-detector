@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus Live Demo
+    type: prometheus
+    uid: anomaly-demo-prometheus
+    access: proxy
+    url: http://127.0.0.1:9091
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 5s
+

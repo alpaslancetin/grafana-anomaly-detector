@@ -1,0 +1,173 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "anomaly-demo-testdata"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "title": "Synthetic anomaly stream",
+        "sensitivity": 2.4,
+        "baselineWindow": 4,
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showSummary": true,
+        "detectionMode": "single",
+        "algorithm": "zscore",
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "metricPreset": "custom",
+        "setupMode": "advanced"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "anomaly-demo-testdata"
+          },
+          "refId": "A",
+          "scenarioId": "raw_frame",
+          "rawFrameContent": "[\n  {\n    \"columns\": [\n      { \"text\": \"Time\", \"type\": \"time\" },\n      { \"text\": \"Requests\", \"type\": \"number\" },\n      { \"text\": \"LatencyMs\", \"type\": \"number\" }\n    ],\n    \"rows\": [\n      [1773381600000, 118, 245],\n      [1773385200000, 121, 248],\n      [1773388800000, 123, 246],\n      [1773392400000, 122, 252],\n      [1773396000000, 124, 249],\n      [1773399600000, 126, 250],\n      [1773403200000, 182, 415],\n      [1773406800000, 125, 251],\n      [1773410400000, 124, 248],\n      [1773414000000, 123, 246],\n      [1773417600000, 119, 244],\n      [1773421200000, 118, 243]\n    ]\n  }\n]"
+        }
+      ],
+      "title": "Anomaly Detector Demo",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "grafana-testdata-datasource",
+        "uid": "anomaly-demo-testdata"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "always",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "anomaly-demo-testdata"
+          },
+          "refId": "A",
+          "scenarioId": "raw_frame",
+          "rawFrameContent": "[\n  {\n    \"columns\": [\n      { \"text\": \"Time\", \"type\": \"time\" },\n      { \"text\": \"Requests\", \"type\": \"number\" },\n      { \"text\": \"LatencyMs\", \"type\": \"number\" }\n    ],\n    \"rows\": [\n      [1773381600000, 118, 245],\n      [1773385200000, 121, 248],\n      [1773388800000, 123, 246],\n      [1773392400000, 122, 252],\n      [1773396000000, 124, 249],\n      [1773399600000, 126, 250],\n      [1773403200000, 182, 415],\n      [1773406800000, 125, 251],\n      [1773410400000, 124, 248],\n      [1773414000000, 123, 246],\n      [1773417600000, 119, 244],\n      [1773421200000, 118, 243]\n    ]\n  }\n]"
+        }
+      ],
+      "title": "Reference time series",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "anomaly",
+    "demo",
+    "testdata"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "2026-03-13T06:00:00Z",
+    "to": "2026-03-13T17:00:00Z"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Provisioned Anomaly Detector Demo",
+  "uid": "anomaly-detector-demo",
+  "version": 6,
+  "weekStart": ""
+}

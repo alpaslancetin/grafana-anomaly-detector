@@ -1,0 +1,232 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "anomaly-demo-prometheus"
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "title": "Prometheus latency anomaly (multi metric)",
+        "sensitivity": 2.4,
+        "baselineWindow": 12,
+        "maxAnomalies": 8,
+        "showBands": true,
+        "showSummary": true,
+        "detectionMode": "multi",
+        "algorithm": "mad",
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "page_first",
+        "metricPreset": "latency",
+        "setupMode": "recommended"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "anomaly-demo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "demo_latency_ms{service=\"checkout\",environment=\"demo\"}",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Prometheus latency anomaly (multi metric)",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "anomaly-demo-prometheus"
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 2,
+      "options": {
+        "title": "Prometheus request anomaly (single metric)",
+        "sensitivity": 2.1,
+        "baselineWindow": 14,
+        "maxAnomalies": 8,
+        "showBands": true,
+        "showSummary": true,
+        "detectionMode": "single",
+        "algorithm": "ewma",
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "warning_first",
+        "metricPreset": "traffic",
+        "setupMode": "recommended"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "anomaly-demo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "demo_requests_per_second{service=\"checkout\",environment=\"demo\"}",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Prometheus request anomaly (single metric)",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "anomaly-demo-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 14,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 3,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "anomaly-demo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "demo_latency_ms{service=\"checkout\",environment=\"demo\"}",
+          "legendFormat": "latency {{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "anomaly-demo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "demo_error_rate_percent{service=\"checkout\",environment=\"demo\"}",
+          "legendFormat": "error {{instance}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Prometheus reference series",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "anomaly",
+    "prometheus",
+    "live",
+    "demo"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Prometheus Live Anomaly Demo",
+  "uid": "prometheus-live-anomaly-demo",
+  "version": 7,
+  "weekStart": ""
+}

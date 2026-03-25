@@ -1,0 +1,46 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.venv/
+**/venv/
+
+# Node and frontend tooling
+**/node_modules/
+**/coverage/
+**/dist/
+**/.eslintcache
+**/playwright-report/
+**/test-results/
+**/playwright/.cache/
+**/*.tsbuildinfo
+
+# Logs and temporary files
+**/*.log
+**/*.tmp
+**/*.temp
+
+# Local environment and secrets
+**/.env
+**/.env.local
+
+# AI assistant and local agent metadata
+**/.codex/
+**/.claude/
+**/CLAUDE.md
+**/GEMINI.md
+**/AGENTS.md
+**/.config/AGENTS/
+
+# Generated tutorial debug assets
+/tutorial/assets/screenshots/_*.png
+/tutorial/assets/video/*
+!/tutorial/assets/video/anomaly-walkthrough.webm
+
+# Runtime state
+/prometheus-live-demo/anomaly_exporter/state/*.json
+/release/alert-bundle/exporter/state/*.json

@@ -1,0 +1,5 @@
+  - job_name: grafana-anomaly-exporter
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - <EXPORTER_HOST_OR_IP>:9110

@@ -1,0 +1,44 @@
+global:
+  prometheus_url: http://prometheus:9090
+  evaluation_interval_seconds: 5
+  request_timeout_seconds: 10
+  listen_host: 0.0.0.0
+  listen_port: 9110
+  config_reload_interval_seconds: 10
+
+rules:
+  - name: checkout_latency
+    description: Alert-ready anomaly score for checkout latency.
+    query: demo_latency_ms{service="checkout",environment="demo"}
+    algorithm: mad
+    threshold: 2.4
+    baseline_window: 12
+    severity_preset: page_first
+    aggregation: max
+    labels:
+      team: platform
+      category: latency
+
+  - name: checkout_traffic
+    description: Alert-ready anomaly score for checkout request throughput.
+    query: demo_requests_per_second{service="checkout",environment="demo"}
+    algorithm: ewma
+    threshold: 2.1
+    baseline_window: 14
+    severity_preset: warning_first
+    aggregation: max
+    labels:
+      team: platform
+      category: traffic
+
+  - name: checkout_error_rate
+    description: Alert-ready anomaly score for checkout error percentage.
+    query: demo_error_rate_percent{service="checkout",environment="demo"}
+    algorithm: mad
+    threshold: 2.6
+    baseline_window: 18
+    severity_preset: page_first
+    aggregation: max
+    labels:
+      team: platform
+      category: error_rate

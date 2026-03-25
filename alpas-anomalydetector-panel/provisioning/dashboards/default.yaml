@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: 'anomaly-detector'
+    folder: 'Anomaly Demo'
+    type: file
+    allowUiUpdates: false
+    updateIntervalSeconds: 10
+    options:
+      path: /etc/grafana/provisioning/dashboards

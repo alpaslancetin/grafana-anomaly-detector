@@ -1,0 +1,9 @@
+global:
+  prometheus_url: http://host.docker.internal:9090
+  evaluation_interval_seconds: 10
+  request_timeout_seconds: 10
+  listen_host: 0.0.0.0
+  listen_port: 9110
+  config_reload_interval_seconds: 10
+
+rules: []

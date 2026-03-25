@@ -1,0 +1,38 @@
+services:
+  synthetic-metrics:
+    build:
+      context: ./synthetic_exporter
+    container_name: anomaly_synthetic_metrics
+    restart: unless-stopped
+    ports:
+      - "9108:9108"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: anomaly_prometheus
+    restart: unless-stopped
+    depends_on:
+      - synthetic-metrics
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090"
+
+  anomaly-exporter:
+    build:
+      context: ./anomaly_exporter
+    container_name: anomaly_score_exporter
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      ANOMALY_CONFIG_PATH: /app/rules.yml
+      ANOMALY_DYNAMIC_RULES_PATH: /app/state/dynamic_rules.json
+    volumes:
+      - ./anomaly_exporter/rules.yml:/app/rules.yml:ro
+      - ./anomaly_exporter/state:/app/state
+    ports:
+      - "9110:9110"

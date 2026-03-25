@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090
+
+  - job_name: synthetic-metrics
+    scrape_interval: 5s
+    static_configs:
+      - targets:
+          - synthetic-metrics:9108
+
+  - job_name: anomaly-exporter
+    scrape_interval: 5s
+    static_configs:
+      - targets:
+          - anomaly-exporter:9110

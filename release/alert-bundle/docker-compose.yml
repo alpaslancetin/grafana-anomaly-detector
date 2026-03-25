@@ -1,0 +1,33 @@
+services:
+  anomaly-exporter:
+    build:
+      context: ./exporter
+    container_name: anomaly_score_exporter
+    restart: unless-stopped
+    environment:
+      ANOMALY_CONFIG_PATH: /app/config.yml
+      ANOMALY_DYNAMIC_RULES_PATH: /app/state/dynamic_rules.json
+      ANOMALY_PROMETHEUS_URL: ${ANOMALY_SOURCE_PROMETHEUS_URL:-http://host.docker.internal:9090}
+      ANOMALY_EVALUATION_INTERVAL_SECONDS: ${ANOMALY_EVALUATION_INTERVAL_SECONDS:-10}
+      ANOMALY_REQUEST_TIMEOUT_SECONDS: ${ANOMALY_REQUEST_TIMEOUT_SECONDS:-10}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./exporter/config.yml:/app/config.yml:ro
+      - ./exporter/state:/app/state
+    ports:
+      - ${ANOMALY_EXPORTER_PORT:-9110}:9110
+
+  anomaly-score-prometheus:
+    image: prom/prometheus:latest
+    container_name: anomaly_score_prometheus
+    restart: unless-stopped
+    depends_on:
+      - anomaly-exporter
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./score-prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - ${ANOMALY_SCORE_PROMETHEUS_PORT:-9092}:9090
