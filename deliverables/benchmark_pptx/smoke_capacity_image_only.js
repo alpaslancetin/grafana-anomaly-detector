@@ -1,3 +1,0 @@
-const P = require('pptxgenjs');
-const { imageSizingContain } = require('./pptxgenjs_helpers/image');
-(async()=>{ const pptx=new P(); pptx.layout='LAYOUT_WIDE'; let slide=pptx.addSlide(); slide.addText('capacity image only',{x:0.5,y:0.3,w:4,h:0.4,fontFace:'Arial',fontSize:22,bold:true}); const img='C:\\Users\\alpas\\Documents\\CodexSample\\grafana-anomaly-lab\\deliverables\\benchmark_pptx\\generated_assets_safe\\capacity_envelope.png'; slide.addImage({path:img,...imageSizingContain(img,0.7,1.0,7.0,4.5)}); await pptx.writeFile({fileName:require('path').join(__dirname,'smoke_capacity_image_only.pptx')}); })();
