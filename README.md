@@ -4,6 +4,14 @@ A Grafana panel plugin for anomaly detection on time-series data, with an option
 
 This repository is intentionally kept simple. It contains the plugin source, the live Prometheus demo, and the release packages needed to install or evaluate the detector.
 
+## Minimum supported Grafana version
+
+This release line requires **Grafana `12.4.0` or later**.
+
+The plugin manifest declares:
+
+- `grafanaDependency: >=12.4.0`
+
 ## Current release
 
 - Plugin version: `1.2.0`
@@ -40,26 +48,14 @@ This repository is intentionally kept simple. It contains the plugin source, the
 
 ## Grafana compatibility
 
-The current `v1.2.0` release is configured for:
+The current `v1.2.0` release is packaged and supported for:
 
-- `grafanaDependency: >=12.4.0`
+- `Grafana >= 12.4.0`
 
-This is defined in:
+This dependency is declared in:
 
 - `alpas-anomalydetector-panel/src/plugin.json`
 - `alpas-anomalydetector-panel/dist/plugin.json`
-
-### Can Grafana 11.4 use this release?
-
-Short answer: **not as a supported target**.
-
-`Grafana 11.4` is below the plugin's declared minimum version. It may partially load in some cases, but this repository and the packaged `v1.2.0` release are not built or validated for `11.4`.
-
-If `Grafana 11.4` support is required, it should be handled as a separate backport effort:
-
-- lower the plugin dependency target
-- retest panel behavior against Grafana `11.4`
-- rebuild and publish a dedicated compatibility release
 
 ## Quick start
 
