@@ -286,6 +286,12 @@ class ExporterRuntime:
             '# TYPE grafana_anomaly_score gauge',
             '# HELP grafana_anomaly_score_raw Raw algorithm score before normalization.',
             '# TYPE grafana_anomaly_score_raw gauge',
+            '# HELP grafana_anomaly_score_point_raw Point-wise raw anomaly score before normalization.',
+            '# TYPE grafana_anomaly_score_point_raw gauge',
+            '# HELP grafana_anomaly_score_window_raw Window-context raw anomaly score before normalization.',
+            '# TYPE grafana_anomaly_score_window_raw gauge',
+            '# HELP grafana_anomaly_confidence_score Confidence score for the anomaly decision normalized to 0-100.',
+            '# TYPE grafana_anomaly_confidence_score gauge',
             '# HELP grafana_anomaly_expected Expected baseline value for the series.',
             '# TYPE grafana_anomaly_expected gauge',
             '# HELP grafana_anomaly_deviation Actual minus expected value.',
@@ -312,6 +318,9 @@ class ExporterRuntime:
             labels = self._build_series_labels(snapshot)
             lines.append(self._render_sample('grafana_anomaly_score', labels, snapshot.normalized_score))
             lines.append(self._render_sample('grafana_anomaly_score_raw', labels, snapshot.raw_score))
+            lines.append(self._render_sample('grafana_anomaly_score_point_raw', labels, snapshot.point_raw_score))
+            lines.append(self._render_sample('grafana_anomaly_score_window_raw', labels, snapshot.window_raw_score))
+            lines.append(self._render_sample('grafana_anomaly_confidence_score', labels, snapshot.confidence_score))
             lines.append(self._render_sample('grafana_anomaly_value', labels, snapshot.value))
             lines.append(self._render_sample('grafana_anomaly_is_anomaly', labels, 1 if snapshot.is_anomaly else 0))
             if snapshot.expected is not None:
@@ -348,6 +357,9 @@ class ExporterRuntime:
                 'algorithm': snapshot.algorithm,
                 'severity_preset': snapshot.severity_preset,
                 'severity_label': snapshot.severity_label,
+                'confidence_label': snapshot.confidence_label,
+                'data_quality': snapshot.data_quality_label,
+                'score_driver': snapshot.score_driver,
             },
             snapshot.labels,
         )

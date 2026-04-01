@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FieldType, PanelProps } from '@grafana/data';
+import { dateTimeFormat, FieldType, PanelProps, timeZoneAbbrevation, TimeZone } from '@grafana/data';
 import { css } from '@emotion/css';
 import { useTheme2 } from '@grafana/ui';
 import { getBackendSrv } from '@grafana/runtime';
@@ -7,12 +7,15 @@ import {
   BucketSpan,
   DetectionAlgorithm,
   DetectionMode,
+  MarkerShapeMode,
   MetricPreset,
   ScoreFeedMode,
   SeasonalRefinement,
   SetupMode,
   SeverityPreset,
   SimpleOptions,
+  TimeAxisDensity,
+  TimeAxisPlacement,
 } from '../types';
 
 interface Props extends PanelProps<SimpleOptions> {}
@@ -24,9 +27,12 @@ type VectorLike = {
 };
 
 type SeverityLabel = 'normal' | 'low' | 'medium' | 'high' | 'critical';
+type ConfidenceLabel = 'low' | 'medium' | 'high';
+type DataQualityLabel = 'healthy' | 'thin' | 'flatline' | 'gappy';
 type EffectiveMetricPreset = Exclude<MetricPreset, 'auto' | 'custom'>;
 type AutoMatchConfidence = 'matched' | 'weak' | 'fallback';
 type RecommendationSource = 'auto' | 'selected' | 'manual';
+type MarkerShape = 'circle' | 'diamond' | 'triangle' | 'square';
 
 type SelectionToken =
   | { kind: 'point'; seriesKey: string; time: number }
@@ -35,6 +41,12 @@ type SelectionToken =
 interface SeverityState {
   severityScore: number;
   severityLabel: SeverityLabel;
+}
+
+interface ConfidenceState {
+  confidenceScore: number;
+  confidenceLabel: ConfidenceLabel;
+  dataQualityLabel: DataQualityLabel;
 }
 
 interface RawPoint {
@@ -47,11 +59,14 @@ interface RawPoint {
   maxValue: number;
 }
 
-interface SamplePoint extends RawPoint, SeverityState {
+interface SamplePoint extends RawPoint, SeverityState, ConfidenceState {
   expected: number | null;
   upper: number | null;
   lower: number | null;
   score: number;
+  pointScore: number;
+  windowScore: number;
+  scoreDriver: 'point' | 'window';
   isAnomaly: boolean;
 }
 
@@ -70,7 +85,7 @@ interface SeriesAnalysis {
   processedPointCount: number;
 }
 
-interface MultiMetricEvent extends SeverityState {
+interface MultiMetricEvent extends SeverityState, ConfidenceState {
   time: number;
   bucketStart: number;
   bucketEnd: number;
@@ -80,7 +95,7 @@ interface MultiMetricEvent extends SeverityState {
   isAnomaly: boolean;
 }
 
-interface SummaryItem extends SeverityState {
+interface SummaryItem extends SeverityState, ConfidenceState {
   key: string;
   time: number;
   title: string;
@@ -90,7 +105,7 @@ interface SummaryItem extends SeverityState {
   selection: SelectionToken;
 }
 
-interface DetailMetricRow extends SeverityState {
+interface DetailMetricRow extends SeverityState, ConfidenceState {
   label: string;
   color: string;
   actual: number;
@@ -99,9 +114,12 @@ interface DetailMetricRow extends SeverityState {
   rangeLower: number | null;
   rangeUpper: number | null;
   score: number;
+  pointScore: number;
+  windowScore: number;
+  scoreDriver: 'point' | 'window';
 }
 
-interface PointSelectionDetail extends SeverityState {
+interface PointSelectionDetail extends SeverityState, ConfidenceState {
   kind: 'point';
   title: string;
   subtitle: string;
@@ -121,9 +139,12 @@ interface PointSelectionDetail extends SeverityState {
   minValue: number;
   maxValue: number;
   score: number;
+  pointScore: number;
+  windowScore: number;
+  scoreDriver: 'point' | 'window';
 }
 
-interface EventSelectionDetail extends SeverityState {
+interface EventSelectionDetail extends SeverityState, ConfidenceState {
   kind: 'event';
   title: string;
   subtitle: string;
@@ -177,8 +198,72 @@ interface ResolvedOptions {
   severityPreset: SeverityPreset;
   bucketSpan: BucketSpan;
   showExpectedLine: boolean;
+  showInlineSeriesLabels: boolean;
+  showFocusBand: boolean;
+  timeAxisDensity: TimeAxisDensity;
+  timeAxisPlacement: TimeAxisPlacement;
+  markerShapeMode: MarkerShapeMode;
   recommendation: MetricPresetRecommendation;
   maxAnomalies: number;
+}
+
+interface InlineSeriesLabel {
+  key: string;
+  label: string;
+  color: string;
+  targetY: number;
+  labelY: number;
+  anchorX: number;
+  lastX: number;
+  lastY: number;
+  width: number;
+  value: number;
+}
+
+interface FocusBandSeries {
+  key: string;
+  label: string;
+  color: string;
+  points: SamplePoint[];
+}
+
+interface FocusBandModel {
+  startTime: number;
+  endTime: number;
+  selectedTime: number;
+  bucketStart: number;
+  bucketEnd: number;
+  title: string;
+  series: FocusBandSeries[];
+  minValue: number;
+  maxValue: number;
+}
+
+interface IncidentRibbonSegment extends SeverityState {
+  key: string;
+  start: number;
+  end: number;
+  center: number;
+  count: number;
+  label: string;
+  selection: SelectionToken;
+}
+
+interface HoverSeriesSnapshot extends SeverityState, ConfidenceState {
+  key: string;
+  label: string;
+  color: string;
+  actual: number;
+  expected: number | null;
+  score: number;
+  isAnomaly: boolean;
+}
+
+interface HoverSnapshot extends SeverityState {
+  time: number;
+  event: MultiMetricEvent | null;
+  series: HoverSeriesSnapshot[];
+  anomalyCount: number;
 }
 
 interface PreparedSeries {
@@ -259,7 +344,7 @@ interface GrafanaAnnotationPayload {
 }
 const SERIES_COLORS = ['#7EB26D', '#EAB839', '#6ED0E0', '#EF843C', '#E24D42', '#1F78C1'];
 const MIN_BASELINE_POINTS = 3;
-const MIN_SEASONAL_SAMPLES = 2;
+const MIN_SEASONAL_SAMPLES = 3;
 const MAX_RENDER_POINTS = 720;
 const AUTO_TARGET_POINTS = 640;
 const PADDING = { top: 18, right: 20, bottom: 42, left: 64 };
@@ -288,6 +373,7 @@ const ALGORITHM_LABELS: Record<DetectionAlgorithm, string> = {
   mad: 'Rolling MAD',
   ewma: 'EWMA baseline',
   seasonal: 'Seasonal baseline',
+  level_shift: 'Level shift detector',
 };
 
 const METRIC_PRESET_LABELS: Record<MetricPreset, string> = {
@@ -298,6 +384,7 @@ const METRIC_PRESET_LABELS: Record<MetricPreset, string> = {
   error_rate: 'Error rate',
   resource: 'Resource usage',
   business: 'Business KPI',
+  level_shift: 'Subtle level shift',
 };
 
 const BUCKET_SPAN_LABELS: Record<BucketSpan, string> = {
@@ -312,8 +399,8 @@ const BUCKET_SPAN_LABELS: Record<BucketSpan, string> = {
 const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> = {
   traffic: {
     algorithm: 'ewma',
-    sensitivity: 2.1,
-    baselineWindow: 14,
+    sensitivity: 4.5,
+    baselineWindow: 30,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
     severityPreset: 'warning_first',
@@ -322,7 +409,7 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   latency: {
     algorithm: 'mad',
-    sensitivity: 2.4,
+    sensitivity: 4.0,
     baselineWindow: 12,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
@@ -332,8 +419,8 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   error_rate: {
     algorithm: 'mad',
-    sensitivity: 2.6,
-    baselineWindow: 18,
+    sensitivity: 4.5,
+    baselineWindow: 12,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
     severityPreset: 'page_first',
@@ -342,8 +429,8 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   resource: {
     algorithm: 'ewma',
-    sensitivity: 2.3,
-    baselineWindow: 18,
+    sensitivity: 4.5,
+    baselineWindow: 24,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
     severityPreset: 'balanced',
@@ -352,16 +439,26 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   business: {
     algorithm: 'seasonal',
-    sensitivity: 2.4,
-    baselineWindow: 10,
+    sensitivity: 4.5,
+    baselineWindow: 8,
     seasonalitySamples: 24,
-    seasonalRefinement: 'weekday_hour',
+    seasonalRefinement: 'cycle',
     severityPreset: 'balanced',
     badge: 'Seasonal data',
     why: 'Business KPIs often repeat by hour or weekday, so seasonal matching reduces false positives on recurring patterns.',
   },
+  level_shift: {
+    algorithm: 'level_shift',
+    sensitivity: 3.2,
+    baselineWindow: 30,
+    seasonalitySamples: 24,
+    seasonalRefinement: 'cycle',
+    severityPreset: 'balanced',
+    badge: 'Sustained change',
+    why: 'When the baseline shifts gradually or steps into a new level, a level-shift detector is better than a pure spike detector.',
+  },
 };
-const AUTO_PRESET_PRIORITY: EffectiveMetricPreset[] = ['latency', 'error_rate', 'resource', 'business', 'traffic'];
+const AUTO_PRESET_PRIORITY: EffectiveMetricPreset[] = ['latency', 'error_rate', 'level_shift', 'resource', 'business', 'traffic'];
 
 const AUTO_PRESET_RULES: Array<{ preset: EffectiveMetricPreset; patterns: RegExp[] }> = [
   {
@@ -375,6 +472,10 @@ const AUTO_PRESET_RULES: Array<{ preset: EffectiveMetricPreset; patterns: RegExp
   {
     preset: 'resource',
     patterns: [/cpu/i, /memory/i, /load/i, /utili/i, /usage/i, /heap/i, /rss/i, /disk/i, /iops/i, /saturation/i, /throttle/i],
+  },
+  {
+    preset: 'level_shift',
+    patterns: [/queue/i, /backlog/i, /pending/i, /session/i, /connection/i, /thread/i, /pool/i, /worker/i, /lag/i, /offset/i, /buffer/i, /inflight/i, /active/i],
   },
   {
     preset: 'business',
@@ -418,6 +519,25 @@ const SEVERITY_COLORS: Record<SeverityLabel, string> = {
   medium: '#F59E0B',
   high: '#F97316',
   critical: '#DC2626',
+};
+
+const CONFIDENCE_LABELS: Record<ConfidenceLabel, string> = {
+  low: 'Low confidence',
+  medium: 'Medium confidence',
+  high: 'High confidence',
+};
+
+const CONFIDENCE_COLORS: Record<ConfidenceLabel, string> = {
+  low: '#F59E0B',
+  medium: '#2563EB',
+  high: '#16A34A',
+};
+
+const DATA_QUALITY_LABELS: Record<DataQualityLabel, string> = {
+  healthy: 'Healthy data',
+  thin: 'Thin history',
+  flatline: 'Flatline risk',
+  gappy: 'Gappy sampling',
 };
 
 const getStyles = (isDark: boolean) => ({
@@ -521,10 +641,17 @@ const getStyles = (isDark: boolean) => ({
   chartCard: css`
     flex: 1 1 auto;
     min-height: 240px;
+    position: relative;
     border-radius: 16px;
     border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
     background: ${isDark ? '#08111F' : '#FFFFFF'};
     overflow: hidden;
+    box-shadow: ${isDark ? 'inset 0 1px 0 rgba(148,163,184,0.05)' : '0 14px 28px rgba(15,23,42,0.05)'};
+    outline: none;
+    &:focus-visible {
+      border-color: ${isDark ? '#60A5FA' : '#2563EB'};
+      box-shadow: ${isDark ? '0 0 0 1px rgba(96,165,250,0.55), inset 0 1px 0 rgba(148,163,184,0.05)' : '0 0 0 1px rgba(37,99,235,0.35), 0 14px 28px rgba(15,23,42,0.05)'};
+    }
   `,
   legend: css`
     display: flex;
@@ -576,6 +703,20 @@ const getStyles = (isDark: boolean) => ({
     display: flex;
     flex-direction: column;
     gap: 8px;
+  `,
+  summaryTimeline: css`
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    border-radius: 14px;
+    border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
+    background: ${isDark ? '#0F172A' : '#F8FAFC'};
+  `,
+  summaryTimelineHint: css`
+    font-size: 11px;
+    line-height: 1.5;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
   `,
   summaryRow: css`
     display: flex;
@@ -653,6 +794,64 @@ const getStyles = (isDark: boolean) => ({
     display: flex;
     flex-direction: column;
     gap: 8px;
+  `,
+  metricBreakdownList: css`
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  `,
+  metricBreakdownCard: css`
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid ${isDark ? '#22314A' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, #101A2B 0%, #0E1625 100%)' : 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)'};
+  `,
+  metricBreakdownHeader: css`
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  `,
+  metricBreakdownTitle: css`
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+  `,
+  metricBreakdownReason: css`
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+  `,
+  metricBreakdownGrid: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    gap: 8px;
+  `,
+  metricBreakdownStat: css`
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid ${isDark ? '#1E293B' : '#E2E8F0'};
+    background: ${isDark ? 'rgba(2, 6, 23, 0.58)' : 'rgba(255, 255, 255, 0.82)'};
+  `,
+  metricBreakdownStatLabel: css`
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+  `,
+  metricBreakdownStatValue: css`
+    margin-top: 5px;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: ${isDark ? '#F8FAFC' : '#0F172A'};
+    overflow-wrap: anywhere;
   `,
   actionRow: css`
     display: flex;
@@ -809,6 +1008,15 @@ const median = (values: number[]): number => {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 };
 
+const mad = (values: number[], center?: number): number => {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const medianCenter = center ?? median(values);
+  return median(values.map((value) => Math.abs(value - medianCenter))) * 1.4826;
+};
+
 const standardDeviation = (values: number[], center?: number): number => {
   if (values.length <= 1) {
     return 0;
@@ -827,6 +1035,28 @@ const safeSpread = (spread: number, reference: number): number => {
   return Math.max(Math.abs(reference) * 0.02, 1e-6);
 };
 
+const getSeasonalBucketKeys = (timestampMs: number): Record<'hour_of_day' | 'weekday_hour', string> => {
+  const date = new Date(timestampMs);
+  return {
+    hour_of_day: `hour:${date.getHours()}`,
+    weekday_hour: `weekday:${date.getDay()}-${date.getHours()}`,
+  };
+};
+
+const getSeasonalExpectedAndSpread = (peers: number[], recentHistory: number[]): { expected: number; spread: number } => {
+  const expected = median(peers);
+  const peerSpread = safeSpread(mad(peers, expected), expected);
+  const deltas = peers.slice(1).map((value, index) => value - peers[index]);
+  const trend = deltas.length >= 2 ? median(deltas) : 0;
+  const deltaSpread = deltas.length >= 2 ? safeSpread(mad(deltas, trend), expected) : 0;
+  const localSpread = recentHistory.length > 0 ? safeSpread(mad(recentHistory), median(recentHistory)) : 0;
+  const spread = Math.max(peerSpread, deltaSpread, localSpread * 0.75);
+  return {
+    expected: expected + trend,
+    spread: safeSpread(spread, expected + trend),
+  };
+};
+
 const formatValue = (value: number | null): string => {
   if (value === null || !Number.isFinite(value)) {
     return 'n/a';
@@ -843,6 +1073,35 @@ const formatValue = (value: number | null): string => {
 
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 };
+
+const formatAxisValue = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+
+  const absolute = Math.abs(value);
+  if (absolute >= 1000) {
+    return value.toLocaleString(undefined, {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    });
+  }
+
+  if (absolute >= 100) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+
+  if (absolute >= 10) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  }
+
+  if (absolute >= 1) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+};
+
 const formatPercent = (value: number | null): string => {
   if (value === null || !Number.isFinite(value)) {
     return 'n/a';
@@ -888,6 +1147,144 @@ const formatBucketWindow = (start: number, end: number): string => {
   }
 
   return `${formatTime(start)} - ${formatTime(end)}`;
+};
+
+const truncateLabel = (value: string, maxLength = 26): string => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+};
+
+const resolveTimeAxisDensity = (density: TimeAxisDensity, totalRangeMs: number): Exclude<TimeAxisDensity, 'auto'> => {
+  if (density !== 'auto') {
+    return density;
+  }
+
+  if (totalRangeMs <= 6 * 60 * 60 * 1000) {
+    return 'dense';
+  }
+
+  if (totalRangeMs <= 36 * 60 * 60 * 1000) {
+    return 'balanced';
+  }
+
+  return 'compact';
+};
+
+const getTimeTickCount = (
+  chartWidth: number,
+  detectionMode: DetectionMode,
+  density: TimeAxisDensity,
+  totalRangeMs: number
+): number => {
+  const resolvedDensity = resolveTimeAxisDensity(density, totalRangeMs);
+  const base = detectionMode === 'multi' ? chartWidth / 235 : chartWidth / 205;
+  const multiplier = resolvedDensity === 'compact' ? 0.76 : resolvedDensity === 'dense' ? 1.35 : 1;
+  const raw = Math.round(base * multiplier);
+  const minTicks = resolvedDensity === 'dense' ? 5 : 4;
+  const maxTicks = resolvedDensity === 'dense' ? 10 : resolvedDensity === 'compact' ? 7 : 8;
+  return Math.max(minTicks, Math.min(maxTicks, raw));
+};
+
+const getGrafanaTimeAxisFormat = (totalRangeMs: number, density: TimeAxisDensity): string => {
+  const resolvedDensity = resolveTimeAxisDensity(density, totalRangeMs);
+
+  if (totalRangeMs <= 12 * 60 * 60 * 1000 || resolvedDensity === 'dense') {
+    return 'HH:mm';
+  }
+
+  if (totalRangeMs <= 72 * 60 * 60 * 1000) {
+    return 'DD/MM HH:mm';
+  }
+
+  return 'DD/MM';
+};
+
+const formatTimeAxisLabel = (timestamp: number, totalRangeMs: number, density: TimeAxisDensity, timeZone: TimeZone): string => {
+  return dateTimeFormat(timestamp, {
+    format: getGrafanaTimeAxisFormat(totalRangeMs, density),
+    timeZone,
+  });
+};
+
+const formatTimeAxisContextLabel = (timestamp: number, totalRangeMs: number, timeZone: TimeZone): string => {
+  if (totalRangeMs <= 72 * 60 * 60 * 1000) {
+    return dateTimeFormat(timestamp, {
+      format: 'ddd DD/MM',
+      timeZone,
+    });
+  }
+
+  return dateTimeFormat(timestamp, {
+    format: 'DD/MM/YYYY',
+    timeZone,
+  });
+};
+
+const formatTooltipTime = (timestamp: number, totalRangeMs: number, timeZone: TimeZone): string =>
+  dateTimeFormat(timestamp, {
+    format: totalRangeMs <= 72 * 60 * 60 * 1000 ? 'DD/MM HH:mm' : 'DD/MM/YYYY HH:mm',
+    timeZone,
+  });
+
+const getSeverityMarkerShape = (severityLabel: SeverityLabel, mode: MarkerShapeMode): MarkerShape => {
+  if (mode === 'classic') {
+    return 'circle';
+  }
+
+  switch (severityLabel) {
+    case 'medium':
+      return 'diamond';
+    case 'high':
+      return 'triangle';
+    case 'critical':
+      return 'square';
+    default:
+      return 'circle';
+  }
+};
+
+const buildMarkerPath = (shape: Exclude<MarkerShape, 'circle' | 'square'>, x: number, y: number, size: number): string => {
+  if (shape === 'diamond') {
+    return `M ${x} ${y - size} L ${x + size} ${y} L ${x} ${y + size} L ${x - size} ${y} Z`;
+  }
+
+  return `M ${x} ${y - size} L ${x + size * 0.92} ${y + size * 0.9} L ${x - size * 0.92} ${y + size * 0.9} Z`;
+};
+
+const renderMarkerGlyph = (
+  shape: MarkerShape,
+  x: number,
+  y: number,
+  size: number,
+  fill: string,
+  stroke?: string,
+  strokeWidth = 0,
+  opacity?: number
+): React.ReactNode => {
+  if (shape === 'circle') {
+    return <circle cx={x} cy={y} r={size} fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={opacity} />;
+  }
+
+  if (shape === 'square') {
+    return (
+      <rect
+        x={x - size}
+        y={y - size}
+        width={size * 2}
+        height={size * 2}
+        rx={Math.max(1.5, size * 0.32)}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        opacity={opacity}
+      />
+    );
+  }
+
+  return <path d={buildMarkerPath(shape, x, y, size)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} opacity={opacity} />;
 };
 
 const normalizeBucketSpan = (requested: BucketSpan | undefined): BucketSpan => {
@@ -981,6 +1378,11 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
       severityPreset: options.severityPreset ?? 'balanced',
       bucketSpan,
       showExpectedLine: options.showExpectedLine !== false,
+      showInlineSeriesLabels: options.showInlineSeriesLabels !== false,
+      showFocusBand: options.showFocusBand !== false,
+      timeAxisDensity: options.timeAxisDensity ?? 'auto',
+      timeAxisPlacement: options.timeAxisPlacement ?? 'top_and_bottom',
+      markerShapeMode: options.markerShapeMode ?? 'severity',
       maxAnomalies,
     };
 
@@ -1007,6 +1409,11 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
     severityPreset: config.severityPreset,
     bucketSpan,
     showExpectedLine: options.showExpectedLine !== false,
+    showInlineSeriesLabels: options.showInlineSeriesLabels !== false,
+    showFocusBand: options.showFocusBand !== false,
+    timeAxisDensity: options.timeAxisDensity ?? 'auto',
+    timeAxisPlacement: options.timeAxisPlacement ?? 'top_and_bottom',
+    markerShapeMode: options.markerShapeMode ?? 'severity',
     maxAnomalies,
   };
 
@@ -1066,23 +1473,156 @@ const getSeverityState = (score: number, threshold: number, severityPreset: Seve
   return { severityScore, severityLabel: 'low' };
 };
 
-const buildAlertGuidance = (severity: SeverityState, severityPreset: SeverityPreset): string => {
+const getWindowScore = (history: number[], currentValue: number, expected: number, spread: number, window: number): number => {
+  const contextWindow = Math.min(Math.max(3, Math.floor(window / 3)), 10);
+  const recent = [...history.slice(-(contextWindow - 1)), currentValue];
+  if (recent.length < 3) {
+    return 0;
+  }
+
+  return Math.abs(mean(recent) - expected) / spread;
+};
+
+const getDataQualityState = (points: RawPoint[], index: number, baselineWindow: number): DataQualityLabel => {
+  const history = points.slice(Math.max(0, index - baselineWindow), index + 1);
+  const values = history.map((entry) => entry.value);
+  const recent = history.slice(-Math.max(4, Math.min(baselineWindow, 8)));
+
+  if (values.length < Math.max(MIN_BASELINE_POINTS, Math.floor(baselineWindow / 2))) {
+    return 'thin';
+  }
+
+  if (recent.length >= 3) {
+    const diffs = recent.slice(1).map((point, offset) => point.time - recent[offset].time).filter((diff) => diff > 0);
+    const expectedStep = diffs.length > 0 ? median(diffs) : null;
+    if (expectedStep && diffs.some((diff) => diff > expectedStep * 2.4)) {
+      return 'gappy';
+    }
+  }
+
+  if (recent.length >= 4) {
+    const recentValues = recent.map((entry) => entry.value);
+    const floor = Math.max(Math.abs(mean(recentValues)) * 0.002, 1e-6);
+    if (Math.max(...recentValues) - Math.min(...recentValues) <= floor) {
+      return 'flatline';
+    }
+  }
+
+  return 'healthy';
+};
+
+const getConfidenceState = (
+  rawScore: number,
+  threshold: number,
+  pointRawScore: number,
+  windowRawScore: number,
+  sampleCount: number,
+  dataQualityLabel: DataQualityLabel
+): ConfidenceState => {
+  const safeThreshold = Math.max(threshold, 1e-6);
+  const ratio = Math.min(rawScore / safeThreshold, 2.5);
+  let confidenceScore = (ratio / 2.5) * 100;
+
+  if (windowRawScore > pointRawScore) {
+    confidenceScore += 8;
+  }
+
+  if (sampleCount >= 8) {
+    confidenceScore += 4;
+  }
+
+  if (dataQualityLabel === 'thin') {
+    confidenceScore -= 18;
+  } else if (dataQualityLabel === 'flatline') {
+    confidenceScore -= 22;
+  } else if (dataQualityLabel === 'gappy') {
+    confidenceScore -= 12;
+  }
+
+  const boundedScore = Math.max(5, Math.min(100, Math.round(confidenceScore * 10) / 10));
+  const confidenceLabel: ConfidenceLabel = boundedScore >= 80 ? 'high' : boundedScore >= 55 ? 'medium' : 'low';
+
+  return {
+    confidenceScore: boundedScore,
+    confidenceLabel,
+    dataQualityLabel,
+  };
+};
+
+const pickWorseDataQuality = (current: DataQualityLabel, candidate: DataQualityLabel): DataQualityLabel => {
+  const rank: DataQualityLabel[] = ['healthy', 'gappy', 'thin', 'flatline'];
+  return rank.indexOf(candidate) > rank.indexOf(current) ? candidate : current;
+};
+
+const getDriverLabel = (scoreDriver: 'point' | 'window', algorithm: DetectionAlgorithm): string => {
+  if (algorithm === 'level_shift') {
+    return scoreDriver === 'window' ? 'Sustained baseline shift' : 'Fresh step change';
+  }
+
+  if (algorithm === 'seasonal') {
+    return 'Seasonal pattern break';
+  }
+
+  if (scoreDriver === 'window') {
+    return algorithm === 'ewma' ? 'Short sustained drift' : 'Sustained deviation';
+  }
+
+  return 'Sharp point deviation';
+};
+
+const buildIncidentHeadline = (label: string, algorithm: DetectionAlgorithm, scoreDriver: 'point' | 'window'): string => {
+  const reason = getDriverLabel(scoreDriver, algorithm);
+  return `${reason} in ${label}`;
+};
+
+const buildSignalStory = (detail: SelectionDetail, algorithm: DetectionAlgorithm): string => {
+  const confidenceText = CONFIDENCE_LABELS[detail.confidenceLabel].replace('confidence', 'signal confidence');
+  const dataQualityText = DATA_QUALITY_LABELS[detail.dataQualityLabel].toLowerCase();
+
+  if (detail.kind === 'event') {
+    return `${detail.activeSeries} metric agreed on this combined anomaly. Strongest reason: ${detail.breakdown[0] ? getDriverLabel(detail.breakdown[0].scoreDriver, algorithm) : 'Cross-metric deviation'}. ${confidenceText}, data quality is ${dataQualityText}.`;
+  }
+
+  const driverText = getDriverLabel(detail.scoreDriver, algorithm);
+  const direction =
+    detail.deviation === null
+      ? 'moved away from baseline'
+      : detail.deviation > 0
+        ? 'moved above its baseline'
+        : detail.deviation < 0
+          ? 'fell below its baseline'
+          : 'stayed close to its baseline';
+
+  return `${detail.seriesLabel} ${direction}. Main reason: ${driverText}. ${confidenceText}, data quality is ${dataQualityText}.`;
+};
+
+const buildAlertGuidance = (severity: SeverityState & Partial<ConfidenceState>, severityPreset: SeverityPreset): string => {
   const presetHint =
     severityPreset === 'warning_first'
       ? 'Warning-first preset surfaces operator-visible severity earlier.'
       : severityPreset === 'page_first'
         ? 'Page-first preset keeps high and critical stricter for paging workflows.'
         : 'Balanced preset aims to work for both dashboards and alert handoff.';
+  const confidenceHint =
+    severity.confidenceLabel === 'low'
+      ? ' Confidence is still low, so verify with nearby metrics before paging.'
+      : severity.dataQualityLabel === 'thin'
+        ? ' History is still thin, so treat this as early signal rather than hard evidence.'
+        : severity.dataQualityLabel === 'flatline'
+          ? ' The series looks nearly flat, so verify the metric is still reporting healthy samples.'
+          : severity.dataQualityLabel === 'gappy'
+            ? ' Recent samples are gappy, so confirm the data source timing before escalating.'
+            : '';
 
   if (severity.severityLabel === 'critical' || severity.severityLabel === 'high') {
-    return `${presetHint} This anomaly is already in the investigate-now range.`;
+    return `${presetHint} This anomaly is already in the investigate-now range.${confidenceHint}`;
   }
 
   if (severity.severityLabel === 'medium') {
-    return `${presetHint} This anomaly looks strong enough for triage or warning workflows.`;
+    return `${presetHint} This anomaly looks strong enough for triage or warning workflows.${confidenceHint}`;
   }
 
-  return `${presetHint} This anomaly is currently better suited to watchlists or dashboard review.`;
+  return `${presetHint} This anomaly is currently better suited to watchlists or dashboard review.${confidenceHint}`;
 };
 
 const dedupeConsecutivePoints = (points: RawPoint[]): RawPoint[] => {
@@ -1200,9 +1740,15 @@ const buildEmptyPoint = (point: RawPoint): SamplePoint => ({
   upper: null,
   lower: null,
   score: 0,
+  pointScore: 0,
+  windowScore: 0,
+  scoreDriver: 'point',
   isAnomaly: false,
   severityLabel: 'normal',
   severityScore: 0,
+  confidenceScore: 5,
+  confidenceLabel: 'low',
+  dataQualityLabel: 'thin',
 });
 
 const collectPreparedSeries = (series: Props['data']['series']): PreparedSeries[] => {
@@ -1274,8 +1820,11 @@ const buildZScorePoints = (points: RawPoint[], threshold: number, window: number
 
     const expected = mean(history);
     const spread = safeSpread(standardDeviation(history, expected), expected);
-    const score = Math.abs(point.value - expected) / spread;
+    const pointScore = Math.abs(point.value - expected) / spread;
+    const windowScore = 0;
+    const score = pointScore;
     const severity = getSeverityState(score, threshold, severityPreset);
+    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, history.length + 1, getDataQualityState(points, index, window));
 
     return {
       ...point,
@@ -1283,8 +1832,12 @@ const buildZScorePoints = (points: RawPoint[], threshold: number, window: number
       lower: expected - threshold * spread,
       upper: expected + threshold * spread,
       score,
+      pointScore,
+      windowScore,
+      scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
       ...severity,
+      ...confidence,
     };
   });
 
@@ -1299,8 +1852,11 @@ const buildMadPoints = (points: RawPoint[], threshold: number, window: number, s
     const deviationHistory = history.map((value) => Math.abs(value - expected));
     const mad = median(deviationHistory) * 1.4826;
     const spread = safeSpread(mad, expected);
-    const score = Math.abs(point.value - expected) / spread;
+    const pointScore = Math.abs(point.value - expected) / spread;
+    const windowScore = 0;
+    const score = pointScore;
     const severity = getSeverityState(score, threshold, severityPreset);
+    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, history.length + 1, getDataQualityState(points, index, window));
 
     return {
       ...point,
@@ -1308,8 +1864,12 @@ const buildMadPoints = (points: RawPoint[], threshold: number, window: number, s
       lower: expected - threshold * spread,
       upper: expected + threshold * spread,
       score,
+      pointScore,
+      windowScore,
+      scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
       ...severity,
+      ...confidence,
     };
   });
 
@@ -1328,8 +1888,12 @@ const buildEwmaPoints = (points: RawPoint[], threshold: number, window: number, 
 
     const expected = smoothed;
     const spread = safeSpread(median(residualHistory.slice(-window)) || standardDeviation(points.slice(Math.max(0, index - window), index).map((entry) => entry.value)), expected);
-    const score = Math.abs(point.value - expected) / spread;
+    const history = points.slice(Math.max(0, index - window), index).map((entry) => entry.value);
+    const pointScore = Math.abs(point.value - expected) / spread;
+    const windowScore = getWindowScore(history, point.value, expected, spread, window);
+    const score = Math.max(pointScore, windowScore);
     const severity = getSeverityState(score, threshold, severityPreset);
+    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, history.length + 1, getDataQualityState(points, index, window));
     residualHistory.push(Math.abs(point.value - expected));
     smoothed = alpha * point.value + (1 - alpha) * expected;
 
@@ -1339,8 +1903,12 @@ const buildEwmaPoints = (points: RawPoint[], threshold: number, window: number, 
       lower: expected - threshold * spread,
       upper: expected + threshold * spread,
       score,
+      pointScore,
+      windowScore,
+      scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
       ...severity,
+      ...confidence,
     });
   });
 
@@ -1355,7 +1923,8 @@ const buildSeasonalPoints = (
   refinement: SeasonalRefinement,
   severityPreset: SeverityPreset
 ): SamplePoint[] => {
-  const historyMap = new Map<string, number[]>();
+  const hourlyHistory = new Map<string, number[]>();
+  const weekdayHistory = new Map<string, number[]>();
 
   return points.map((point, index) => {
     let peers: number[] = [];
@@ -1364,22 +1933,36 @@ const buildSeasonalPoints = (
         peers.push(points[cursor].value);
       }
     } else {
-      const date = new Date(point.time);
-      const key = refinement === 'hour_of_day' ? `${date.getHours()}` : `${date.getDay()}-${date.getHours()}`;
-      peers = [...(historyMap.get(key) ?? [])].slice(-window).reverse();
-      const stored = historyMap.get(key) ?? [];
-      stored.push(point.value);
-      historyMap.set(key, stored);
+      const bucketKeys = getSeasonalBucketKeys(point.time);
+      peers =
+        refinement === 'hour_of_day'
+          ? [...(hourlyHistory.get(bucketKeys.hour_of_day) ?? [])].slice(-window)
+          : [...(weekdayHistory.get(bucketKeys.weekday_hour) ?? [])].slice(-window);
+
+      if (refinement === 'weekday_hour' && peers.length < MIN_SEASONAL_SAMPLES) {
+        peers = [...(hourlyHistory.get(bucketKeys.hour_of_day) ?? [])].slice(-window);
+      }
+
+      const hourStored = hourlyHistory.get(bucketKeys.hour_of_day) ?? [];
+      hourStored.push(point.value);
+      hourlyHistory.set(bucketKeys.hour_of_day, hourStored);
+
+      const weekdayStored = weekdayHistory.get(bucketKeys.weekday_hour) ?? [];
+      weekdayStored.push(point.value);
+      weekdayHistory.set(bucketKeys.weekday_hour, weekdayStored);
     }
 
     if (peers.length < MIN_SEASONAL_SAMPLES) {
       return buildEmptyPoint(point);
     }
 
-    const expected = mean(peers);
-    const spread = safeSpread(standardDeviation(peers, expected), expected);
-    const score = Math.abs(point.value - expected) / spread;
+    const recentHistory = points.slice(Math.max(0, index - window), index).map((entry) => entry.value);
+    const { expected, spread } = getSeasonalExpectedAndSpread(peers, recentHistory);
+    const pointScore = Math.abs(point.value - expected) / spread;
+    const windowScore = 0;
+    const score = pointScore;
     const severity = getSeverityState(score, threshold, severityPreset);
+    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, recentHistory.length + 1, getDataQualityState(points, index, window));
 
     return {
       ...point,
@@ -1387,11 +1970,61 @@ const buildSeasonalPoints = (
       lower: expected - threshold * spread,
       upper: expected + threshold * spread,
       score,
+      pointScore,
+      windowScore,
+      scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
       ...severity,
+      ...confidence,
     };
   });
 };
+
+const buildLevelShiftPoints = (points: RawPoint[], threshold: number, window: number, severityPreset: SeverityPreset): SamplePoint[] =>
+  points.map((point, index) => {
+    const history = points.slice(Math.max(0, index - window), index);
+    const historyValues = history.map((entry) => entry.value);
+    if (historyValues.length < Math.max(MIN_BASELINE_POINTS * 2, 6)) {
+      return buildEmptyPoint(point);
+    }
+
+    const shiftWindow = Math.min(Math.max(3, Math.floor(window / 3)), 12);
+    const baselineHistory = historyValues.slice(-window);
+    if (baselineHistory.length <= shiftWindow) {
+      return buildEmptyPoint(point);
+    }
+
+    const baselineOnly = baselineHistory.slice(0, -Math.max(1, shiftWindow - 1));
+    if (baselineOnly.length < MIN_BASELINE_POINTS) {
+      return buildEmptyPoint(point);
+    }
+
+    const expected = median(baselineOnly);
+    const spread = Math.max(safeSpread(mad(baselineOnly, expected), expected), safeSpread(standardDeviation(baselineOnly, expected), expected));
+    const pointScore = Math.abs(point.value - expected) / spread;
+    const recent = [...historyValues.slice(-(shiftWindow - 1)), point.value];
+    const recentCenter = median(recent);
+    const persistentBuckets = recent.filter((value) => Math.abs(value - expected) > spread).length;
+    const persistenceRatio = persistentBuckets / recent.length;
+    const windowScore = (Math.abs(recentCenter - expected) / spread) * (1 + Math.max(0, persistenceRatio - 0.4));
+    const score = Math.max(pointScore * 0.85, windowScore);
+    const severity = getSeverityState(score, threshold, severityPreset);
+    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, baselineHistory.length + 1, getDataQualityState(points, index, window));
+
+    return {
+      ...point,
+      expected,
+      lower: expected - threshold * spread,
+      upper: expected + threshold * spread,
+      score,
+      pointScore,
+      windowScore,
+      scoreDriver: windowScore >= pointScore * 0.85 ? 'window' : 'point',
+      isAnomaly: score >= threshold,
+      ...severity,
+      ...confidence,
+    };
+  });
 const downsamplePoints = (points: SamplePoint[]): SamplePoint[] => {
   if (points.length <= MAX_RENDER_POINTS) {
     return points;
@@ -1425,6 +2058,8 @@ const analyzePoints = (points: RawPoint[], options: ResolvedOptions): SamplePoin
       return buildMadPoints(points, threshold, window, options.severityPreset);
     case 'ewma':
       return buildEwmaPoints(points, threshold, window, options.severityPreset);
+    case 'level_shift':
+      return buildLevelShiftPoints(points, threshold, window, options.severityPreset);
     case 'seasonal':
       return buildSeasonalPoints(points, threshold, window, Math.max(options.seasonalitySamples, 2), options.seasonalRefinement, options.severityPreset);
     case 'zscore':
@@ -1486,6 +2121,9 @@ const buildMultiMetricEvents = (analyses: SeriesAnalysis[], options: ResolvedOpt
       const score = top.slice(0, Math.min(3, top.length)).reduce((sum, item) => sum + item.point.score, 0) / Math.min(3, top.length || 1);
       const severity = top.reduce<SeverityState>((current, item) => pickHigherSeverity(current, item.point), { severityLabel: 'normal', severityScore: 0 });
       const strongest = top[0];
+      const confidenceScore = top.slice(0, Math.min(3, top.length)).reduce((sum, item) => sum + item.point.confidenceScore, 0) / Math.min(3, top.length || 1);
+      const confidenceLabel: ConfidenceLabel = confidenceScore >= 80 ? 'high' : confidenceScore >= 55 ? 'medium' : 'low';
+      const dataQualityLabel = top.reduce<DataQualityLabel>((current, item) => pickWorseDataQuality(current, item.point.dataQualityLabel), 'healthy');
 
       return {
         time,
@@ -1497,6 +2135,9 @@ const buildMultiMetricEvents = (analyses: SeriesAnalysis[], options: ResolvedOpt
         isAnomaly: score >= options.sensitivity || top.some((item) => item.point.isAnomaly),
         severityLabel: severity.severityLabel,
         severityScore: severity.severityScore,
+        confidenceScore: Math.round(confidenceScore * 10) / 10,
+        confidenceLabel,
+        dataQualityLabel,
       };
     })
     .sort((left, right) => left.time - right.time);
@@ -1622,6 +2263,286 @@ const selectVisibleMarkers = <T extends { time: number; score: number }>(
 
   return visible;
 };
+
+const findNearestTimeIndex = (times: number[], target: number): number => {
+  if (times.length === 0) {
+    return -1;
+  }
+
+  let closestIndex = 0;
+  let closestDistance = Math.abs(times[0] - target);
+
+  for (let index = 1; index < times.length; index += 1) {
+    const distance = Math.abs(times[index] - target);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  }
+
+  return closestIndex;
+};
+
+const buildInlineSeriesLabels = (
+  analyses: SeriesAnalysis[],
+  getX: (time: number) => number,
+  getY: (value: number) => number,
+  top: number,
+  bottom: number,
+  anchorX: number
+): InlineSeriesLabel[] => {
+  const candidates = analyses
+    .map((analysis) => {
+      const point = [...analysis.points].reverse().find((item) => Number.isFinite(item.value));
+      if (!point) {
+        return null;
+      }
+
+      const labelText = truncateLabel(`${analysis.label} • ${formatValue(point.value)}`, 28);
+      return {
+        key: analysis.key,
+        label: labelText,
+        color: analysis.color,
+        targetY: getY(point.value),
+        labelY: getY(point.value),
+        anchorX,
+        lastX: getX(point.time),
+        lastY: getY(point.value),
+        width: Math.max(84, Math.min(168, labelText.length * 6.6 + 18)),
+        value: point.value,
+      };
+    })
+    .filter((item): item is InlineSeriesLabel => item !== null)
+    .sort((left, right) => left.targetY - right.targetY);
+
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const minGap = 20;
+  let cursor = top + 14;
+  for (const label of candidates) {
+    label.labelY = Math.max(label.targetY, cursor);
+    cursor = label.labelY + minGap;
+  }
+
+  cursor = bottom - 12;
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const label = candidates[index];
+    label.labelY = Math.min(label.labelY, cursor);
+    cursor = label.labelY - minGap;
+  }
+
+  return candidates.map((label) => ({
+    ...label,
+    labelY: Math.max(top + 14, Math.min(bottom - 12, label.labelY)),
+  }));
+};
+
+const buildFocusBandModel = (
+  selectionDetail: SelectionDetail | null,
+  analyses: SeriesAnalysis[],
+  times: number[]
+): FocusBandModel | null => {
+  if (!selectionDetail || times.length < 2) {
+    return null;
+  }
+
+  const centerIndex = findNearestTimeIndex(times, selectionDetail.time);
+  if (centerIndex < 0) {
+    return null;
+  }
+
+  const radius = Math.max(3, Math.min(5, Math.floor(times.length / 10) || 3));
+  const startIndex = Math.max(0, centerIndex - radius);
+  const endIndex = Math.min(times.length - 1, centerIndex + radius);
+  const startTime = times[startIndex];
+  const endTime = times[endIndex];
+
+  if (endTime <= startTime) {
+    return null;
+  }
+
+  const series = analyses
+    .map((analysis) => ({
+      key: analysis.key,
+      label: analysis.label,
+      color: analysis.color,
+      points: analysis.allPoints.filter((point) => point.time >= startTime && point.time <= endTime),
+    }))
+    .filter((analysis) => analysis.points.length > 0);
+
+  if (series.length === 0) {
+    return null;
+  }
+
+  const values = series.flatMap((analysis) =>
+    analysis.points.flatMap((point) => [point.value, point.expected].filter((value): value is number => value !== null && Number.isFinite(value)))
+  );
+
+  if (values.length === 0) {
+    return null;
+  }
+
+  return {
+    startTime,
+    endTime,
+    selectedTime: selectionDetail.time,
+    bucketStart: selectionDetail.bucketStart,
+    bucketEnd: selectionDetail.bucketEnd,
+    title: selectionDetail.kind === 'event' ? 'Focused incident window' : `Focused view for ${selectionDetail.seriesLabel}`,
+    series,
+    minValue: Math.min(...values),
+    maxValue: Math.max(...values),
+  };
+};
+
+const buildIncidentRibbonSegments = (
+  analyses: SeriesAnalysis[],
+  events: MultiMetricEvent[],
+  mode: DetectionMode,
+  times: number[]
+): IncidentRibbonSegment[] => {
+  const timeStepMs =
+    times.length >= 2
+      ? median(
+          times.slice(1).map((time, index) => {
+            return Math.max(time - times[index], 1);
+          })
+        )
+      : 60 * 1000;
+  const clusterGapMs = Math.max(timeStepMs * 1.25, 30 * 1000);
+
+  const rawSegments =
+    mode === 'multi'
+      ? events
+          .filter((event) => event.isAnomaly)
+          .map((event) => ({
+            start: event.bucketStart,
+            end: Math.max(event.bucketEnd, event.time),
+            center: event.time,
+            severityLabel: event.severityLabel,
+            severityScore: event.severityScore,
+            selection: { kind: 'event', time: event.time } as SelectionToken,
+          }))
+      : analyses.flatMap((analysis) =>
+          analysis.allPoints
+            .filter((point) => point.isAnomaly)
+            .map((point) => ({
+              start: point.bucketStart,
+              end: Math.max(point.bucketEnd, point.time),
+              center: point.time,
+              severityLabel: point.severityLabel,
+              severityScore: point.severityScore,
+              selection: { kind: 'point', seriesKey: analysis.key, time: point.time } as SelectionToken,
+            }))
+        );
+
+  if (rawSegments.length === 0) {
+    return [];
+  }
+
+  rawSegments.sort((left, right) => left.start - right.start);
+  const grouped: IncidentRibbonSegment[] = [];
+  let cluster = [rawSegments[0]];
+
+  const flushCluster = () => {
+    if (cluster.length === 0) {
+      return;
+    }
+
+    const strongest = cluster.reduce<SeverityState & { selection: SelectionToken; center: number }>(
+      (current, item) => {
+        const candidate = pickHigherSeverity(current, item);
+        return candidate === current ? current : item;
+      },
+      cluster[0]
+    );
+
+    const start = Math.min(...cluster.map((item) => item.start));
+    const end = Math.max(...cluster.map((item) => item.end));
+    grouped.push({
+      key: `ribbon-${start}-${end}-${grouped.length}`,
+      start,
+      end,
+      center: strongest.center,
+      count: cluster.length,
+      label: cluster.length === 1 ? '1 incident' : `${cluster.length} incidents`,
+      severityLabel: strongest.severityLabel,
+      severityScore: strongest.severityScore,
+      selection: strongest.selection,
+    });
+    cluster = [];
+  };
+
+  for (let index = 1; index < rawSegments.length; index += 1) {
+    const current = rawSegments[index];
+    const last = cluster[cluster.length - 1];
+    if (current.start <= last.end + clusterGapMs) {
+      cluster.push(current);
+      continue;
+    }
+    flushCluster();
+    cluster = [current];
+  }
+
+  flushCluster();
+  return grouped;
+};
+
+const buildHoverSnapshot = (
+  hoverTime: number | null,
+  analyses: SeriesAnalysis[],
+  events: MultiMetricEvent[]
+): HoverSnapshot | null => {
+  if (hoverTime === null) {
+    return null;
+  }
+
+  const series = analyses
+    .map((analysis) => {
+      const point = analysis.allPoints.find((item) => item.time === hoverTime);
+      if (!point) {
+        return null;
+      }
+
+      return {
+        key: analysis.key,
+        label: analysis.label,
+        color: analysis.color,
+        actual: point.value,
+        expected: point.expected,
+        score: point.score,
+        isAnomaly: point.isAnomaly,
+        severityLabel: point.severityLabel,
+        severityScore: point.severityScore,
+        confidenceScore: point.confidenceScore,
+        confidenceLabel: point.confidenceLabel,
+        dataQualityLabel: point.dataQualityLabel,
+      };
+    })
+    .filter((item): item is HoverSeriesSnapshot => item !== null)
+    .sort((left, right) => right.score - left.score);
+
+  if (series.length === 0) {
+    return null;
+  }
+
+  const event = events.find((item) => item.time === hoverTime) ?? null;
+  const strongest = event
+    ? { severityLabel: event.severityLabel, severityScore: event.severityScore }
+    : series.reduce<SeverityState>((current, item) => pickHigherSeverity(current, item), { severityLabel: 'normal', severityScore: 0 });
+
+  return {
+    time: hoverTime,
+    event,
+    series,
+    anomalyCount: series.filter((item) => item.isAnomaly).length + (event?.isAnomaly ? 1 : 0),
+    severityLabel: strongest.severityLabel,
+    severityScore: strongest.severityScore,
+  };
+};
+
 const limitMarkerCount = <T extends { time: number; score: number }>(
   items: T[],
   maxCount: number,
@@ -1654,13 +2575,54 @@ const limitMarkerCount = <T extends { time: number; score: number }>(
 
 const buildHowItWorksText = (options: ResolvedOptions, effectiveBucketSpanMs: number | null): string => {
   const bucketText = formatEffectiveBucketSpanLabel(options.bucketSpan, effectiveBucketSpanMs);
-  const base = `${MODE_LABELS[options.detectionMode]} uses ${ALGORITHM_LABELS[options.algorithm]} with threshold ${options.sensitivity.toFixed(2)} and history window ${options.baselineWindow}.`;
-  const seasonal =
-    options.algorithm === 'seasonal'
-      ? ` Seasonal refinement is ${SEASONAL_REFINEMENT_LABELS[options.seasonalRefinement]} with ${options.seasonalitySamples} seasonal samples.`
-      : '';
+  const profileText =
+    options.effectiveMetricPreset === 'custom'
+      ? 'Custom profile is active.'
+      : `${METRIC_PRESET_LABELS[options.effectiveMetricPreset]} profile is active.`;
+  const algorithmText =
+    options.algorithm === 'level_shift'
+      ? `It focuses on sustained baseline shifts over the last ${options.baselineWindow} buckets.`
+      : options.algorithm === 'seasonal'
+        ? `It compares each point with similar historical positions using ${SEASONAL_REFINEMENT_LABELS[options.seasonalRefinement].toLowerCase()} refinement and ${options.seasonalitySamples} seasonal samples.`
+        : options.algorithm === 'ewma'
+          ? `It keeps a moving baseline over ${options.baselineWindow} buckets and reacts when the live metric keeps pulling away from that baseline.`
+          : options.algorithm === 'mad'
+            ? `It uses a robust median-based spread over ${options.baselineWindow} buckets so noisy data does not create too many false alarms.`
+            : `It compares each point with a rolling average over ${options.baselineWindow} buckets.`;
+  const bucketMessage = effectiveBucketSpanMs
+    ? `Dense data is first summarized into ${bucketText} buckets so the panel stays fast.`
+    : 'Incoming samples are scored directly for maximum detail.';
 
-  return `${base}${seasonal} Bucket span is ${bucketText}, which means the detector ${effectiveBucketSpanMs ? 'pre-aggregates dense data before scoring to stay fast on live dashboards.' : 'scores raw incoming points directly for the most detailed analysis.'}`;
+  return `${profileText} ${algorithmText} Current threshold is ${options.sensitivity.toFixed(2)}. ${bucketMessage}`;
+};
+
+const buildIncidentGroups = (points: SamplePoint[]): SamplePoint[][] => {
+  const anomalies = points.filter((point) => point.isAnomaly).sort((left, right) => left.time - right.time);
+  if (anomalies.length === 0) {
+    return [];
+  }
+
+  const groups: SamplePoint[][] = [];
+  let currentGroup: SamplePoint[] = [anomalies[0]];
+
+  for (let index = 1; index < anomalies.length; index += 1) {
+    const previous = currentGroup[currentGroup.length - 1];
+    const candidate = anomalies[index];
+    const previousSpan = Math.max(previous.bucketEnd - previous.bucketStart, 1);
+    const candidateSpan = Math.max(candidate.bucketEnd - candidate.bucketStart, 1);
+    const mergeGap = Math.max(previousSpan, candidateSpan) * 1.25;
+
+    if (candidate.bucketStart <= previous.bucketEnd + mergeGap) {
+      currentGroup.push(candidate);
+      continue;
+    }
+
+    groups.push(currentGroup);
+    currentGroup = [candidate];
+  }
+
+  groups.push(currentGroup);
+  return groups;
 };
 
 const buildSummaryItems = (analyses: SeriesAnalysis[], events: MultiMetricEvent[], options: ResolvedOptions): SummaryItem[] => {
@@ -1672,34 +2634,51 @@ const buildSummaryItems = (analyses: SeriesAnalysis[], events: MultiMetricEvent[
       .map((event, index) => ({
         key: `event-${event.time}-${index}`,
         time: event.time,
-        title: `Combined anomaly at ${formatTime(event.time)}`,
-        subtitle: `${event.activeSeries} active series${event.contributors.length > 0 ? ` | ${event.contributors.join(', ')}` : ''}`,
-        detail: `Score ${formatValue(event.score)} | ${SEVERITY_LABELS[event.severityLabel]} ${event.severityScore}`,
+        title: `Cross-metric incident at ${formatTime(event.time)}`,
+        subtitle: `${event.activeSeries} metric${event.activeSeries === 1 ? '' : 's'} aligned${event.contributors.length > 0 ? ` | ${event.contributors.join(', ')}` : ''}`,
+        detail: `${SEVERITY_LABELS[event.severityLabel]} ${event.severityScore} | ${CONFIDENCE_LABELS[event.confidenceLabel]} | ${DATA_QUALITY_LABELS[event.dataQualityLabel]}`,
         score: event.score,
         severityLabel: event.severityLabel,
         severityScore: event.severityScore,
+        confidenceScore: event.confidenceScore,
+        confidenceLabel: event.confidenceLabel,
+        dataQualityLabel: event.dataQualityLabel,
         selection: { kind: 'event' as const, time: event.time },
       }));
   }
 
   return analyses
     .flatMap((analysis) =>
-      analysis.allPoints
-        .filter((point) => point.isAnomaly)
-        .map((point, index) => ({
-          key: `${analysis.key}-${point.time}-${index}`,
-          time: point.time,
-          title: `${analysis.label} anomaly`,
-          subtitle: formatBucketWindow(point.bucketStart, point.bucketEnd),
-          detail: `Actual ${formatValue(point.value)} | expected ${formatValue(point.expected)} | score ${formatValue(point.score)}`,
-          score: point.score,
-          severityLabel: point.severityLabel,
-          severityScore: point.severityScore,
-          selection: { kind: 'point' as const, seriesKey: analysis.key, time: point.time },
-        }))
+      buildIncidentGroups(analysis.allPoints).map((incident, index) => {
+        const peak = incident.reduce((current, point) => (point.score > current.score ? point : current));
+        const incidentStart = incident[0].bucketStart;
+        const incidentEnd = incident[incident.length - 1].bucketEnd;
+        return {
+          key: `${analysis.key}-${peak.time}-${index}`,
+          time: peak.time,
+          title: buildIncidentHeadline(analysis.label, options.algorithm, peak.scoreDriver),
+          subtitle: incident.length > 1 ? `${incident.length} consecutive buckets | ${formatBucketWindow(incidentStart, incidentEnd)}` : formatBucketWindow(incidentStart, incidentEnd),
+          detail: `${SEVERITY_LABELS[peak.severityLabel]} ${peak.severityScore} | ${CONFIDENCE_LABELS[peak.confidenceLabel]} | Current ${formatValue(peak.value)} vs expected ${formatValue(peak.expected)}`,
+          score: peak.score,
+          severityLabel: peak.severityLabel,
+          severityScore: peak.severityScore,
+          confidenceScore: peak.confidenceScore,
+          confidenceLabel: peak.confidenceLabel,
+          dataQualityLabel: peak.dataQualityLabel,
+          selection: { kind: 'point' as const, seriesKey: analysis.key, time: peak.time },
+        };
+      })
     )
     .sort((left, right) => right.score - left.score)
     .slice(0, options.maxAnomalies);
+};
+
+const isKeyboardNavigationTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return ['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'A'].includes(target.tagName) || target.isContentEditable;
 };
 
 const selectionExists = (selection: SelectionToken | null, analyses: SeriesAnalysis[], events: MultiMetricEvent[]): boolean => {
@@ -1731,7 +2710,7 @@ const buildSelectionDetail = (selection: SelectionToken | null, analyses: Series
 
     return {
       kind: 'point',
-      title: `${analysis.label} selected anomaly`,
+      title: `${point.scoreDriver === 'window' ? 'Sustained change' : 'Sharp change'} in ${analysis.label}`,
       subtitle: formatBucketWindow(point.bucketStart, point.bucketEnd),
       seriesKey: analysis.key,
       seriesLabel: analysis.label,
@@ -1749,8 +2728,14 @@ const buildSelectionDetail = (selection: SelectionToken | null, analyses: Series
       minValue: point.minValue,
       maxValue: point.maxValue,
       score: point.score,
+      pointScore: point.pointScore,
+      windowScore: point.windowScore,
+      scoreDriver: point.scoreDriver,
       severityLabel: point.severityLabel,
       severityScore: point.severityScore,
+      confidenceScore: point.confidenceScore,
+      confidenceLabel: point.confidenceLabel,
+      dataQualityLabel: point.dataQualityLabel,
     };
   }
 
@@ -1775,8 +2760,14 @@ const buildSelectionDetail = (selection: SelectionToken | null, analyses: Series
         rangeLower: point.lower,
         rangeUpper: point.upper,
         score: point.score,
+        pointScore: point.pointScore,
+        windowScore: point.windowScore,
+        scoreDriver: point.scoreDriver,
         severityLabel: point.severityLabel,
         severityScore: point.severityScore,
+        confidenceScore: point.confidenceScore,
+        confidenceLabel: point.confidenceLabel,
+        dataQualityLabel: point.dataQualityLabel,
       } as DetailMetricRow;
     })
     .filter((item): item is DetailMetricRow => item !== null)
@@ -1784,7 +2775,7 @@ const buildSelectionDetail = (selection: SelectionToken | null, analyses: Series
 
   return {
     kind: 'event',
-    title: `Combined anomaly at ${formatTime(event.time)}`,
+    title: `Cross-metric incident at ${formatTime(event.time)}`,
     subtitle: formatBucketWindow(event.bucketStart, event.bucketEnd),
     time: event.time,
     bucketStart: event.bucketStart,
@@ -1795,6 +2786,9 @@ const buildSelectionDetail = (selection: SelectionToken | null, analyses: Series
     breakdown,
     severityLabel: event.severityLabel,
     severityScore: event.severityScore,
+    confidenceScore: event.confidenceScore,
+    confidenceLabel: event.confidenceLabel,
+    dataQualityLabel: event.dataQualityLabel,
   };
 };
 
@@ -1803,8 +2797,11 @@ const buildAnnotationExport = (items: SummaryItem[], bucketSpanLabel: string): s
     items.map((item) => ({
       time: item.time,
       text: item.title,
-      tags: ['anomaly-detector', item.severityLabel, bucketSpanLabel],
+      tags: ['anomaly-detector', item.severityLabel, item.confidenceLabel, item.dataQualityLabel, bucketSpanLabel],
       detail: item.detail,
+      confidence_score: item.confidenceScore,
+      confidence_label: item.confidenceLabel,
+      data_quality: item.dataQualityLabel,
     })),
     null,
     2
@@ -1861,6 +2858,9 @@ const buildAlertExport = (detail: SelectionDetail | null, options: ResolvedOptio
       severity_preset: options.severityPreset,
       selected_severity: detail ? detail.severityLabel : 'normal',
       selected_score: detail ? detail.score : 0,
+      selected_confidence: detail ? detail.confidenceLabel : 'low',
+      selected_confidence_score: detail ? detail.confidenceScore : 0,
+      selected_data_quality: detail ? detail.dataQualityLabel : 'thin',
       guidance: detail ? buildAlertGuidance(detail, options.severityPreset) : 'Select an anomaly to generate a focused alert draft.',
     },
     null,
@@ -1887,7 +2887,7 @@ const buildSelectedAnnotationPayload = (
     return null;
   }
 
-  const tags = ['anomaly-detector', detail.severityLabel, slugifyTagValue(bucketSpanLabel), detail.kind];
+  const tags = ['anomaly-detector', detail.severityLabel, detail.confidenceLabel, detail.dataQualityLabel, slugifyTagValue(bucketSpanLabel), detail.kind];
   const payload: GrafanaAnnotationPayload = {
     time: detail.bucketStart,
     tags,
@@ -1914,6 +2914,8 @@ const buildSelectedAnnotationPayload = (
       detail.title,
       `Window: ${formatBucketWindow(detail.bucketStart, detail.bucketEnd)}`,
       `Score: ${formatValue(detail.score)} | Severity: ${SEVERITY_LABELS[detail.severityLabel]} ${detail.severityScore}`,
+      `Confidence: ${CONFIDENCE_LABELS[detail.confidenceLabel]} (${formatValue(detail.confidenceScore)})`,
+      `Data quality: ${DATA_QUALITY_LABELS[detail.dataQualityLabel]}`,
       `Actual: ${formatValue(detail.actual)} | Expected: ${formatValue(detail.expected)}`,
       `Deviation: ${formatValue(detail.deviation)}${detail.deviationPercent === null ? '' : ` (${formatValue(detail.deviationPercent)}%)`}`,
       `Expected range: ${formatValue(detail.rangeLower)} to ${formatValue(detail.rangeUpper)}`,
@@ -1925,6 +2927,8 @@ const buildSelectedAnnotationPayload = (
     detail.title,
     `Window: ${formatBucketWindow(detail.bucketStart, detail.bucketEnd)}`,
     `Score: ${formatValue(detail.score)} | Severity: ${SEVERITY_LABELS[detail.severityLabel]} ${detail.severityScore}`,
+    `Confidence: ${CONFIDENCE_LABELS[detail.confidenceLabel]} (${formatValue(detail.confidenceScore)})`,
+    `Data quality: ${DATA_QUALITY_LABELS[detail.dataQualityLabel]}`,
     `Active series: ${detail.activeSeries}`,
     `Top contributors: ${detail.contributors.join(', ') || 'No contributors found'}`,
   ].join('\n');
@@ -2508,7 +3512,7 @@ const useScoreFeedSync = ({
   };
 };
 
-export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height }) => {
+export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height, timeRange, timeZone }) => {
   const theme = useTheme2();
   const styles = getStyles(theme.isDark);
   const preparedSeries = useMemo(() => collectPreparedSeries(data.series), [data.series]);
@@ -2540,6 +3544,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
     [analyses, events, options.showSummary, resolvedOptions]
   );
   const [selection, setSelection] = useState<SelectionToken | null>(null);
+  const [hoveredTime, setHoveredTime] = useState<number | null>(null);
+  const [pinnedTime, setPinnedTime] = useState<number | null>(null);
   const [actionToast, setActionToast] = useState<ActionToast | null>(null);
   const [scoreFeedExpanded, setScoreFeedExpanded] = useState(false);
   const [exportsExpanded, setExportsExpanded] = useState(false);
@@ -2547,6 +3553,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
     () => (selectionExists(selection, analyses, events) ? selection : summaryItems[0]?.selection ?? null),
     [analyses, events, selection, summaryItems]
   );
+  const orderedSummaryItems = useMemo(() => [...summaryItems].sort((left, right) => left.time - right.time), [summaryItems]);
+  const activeSelectionToken = selectionKey(activeSelection);
 
   useEffect(() => {
     if (!actionToast || typeof window === 'undefined') {
@@ -2562,15 +3570,27 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
     };
   }, [actionToast]);
 
+  const selectSummaryItem = useCallback((item: SummaryItem | null) => {
+    if (!item) {
+      return;
+    }
+
+    setSelection(item.selection);
+    setPinnedTime(item.time);
+    setHoveredTime(item.time);
+  }, []);
+
   const selectionDetail = useMemo(() => buildSelectionDetail(activeSelection, analyses, events), [activeSelection, analyses, events]);
   const allPoints = useMemo(() => analyses.flatMap((analysis) => analysis.allPoints), [analyses]);
+  const interactionTime = pinnedTime ?? hoveredTime;
+  const hoverSnapshot = useMemo(() => buildHoverSnapshot(interactionTime, analyses, events), [interactionTime, analyses, events]);
   const scoreFeedStatusColor = getScoreFeedStatusColor(scoreFeed.kind, theme.isDark);
   const scoreFeedCard =
     options.scoreFeedMode !== 'off' ? (
       <div className={`${styles.card} ${styles.wideCard}`}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0, flex: '1 1 320px' }}>
-            <div className={styles.cardTitle}>Prometheus score feed</div>
+            <div className={styles.cardTitle}>Prometheus anomaly score feed</div>
             <div className={styles.subtitle}>{scoreFeed.message}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -2603,7 +3623,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
           <div className={styles.detailStat}><div className={styles.detailLabel}>Mode</div><div className={styles.detailValue}>{SCORE_FEED_MODE_LABELS[options.scoreFeedMode]}</div></div>
           <div className={styles.detailStat}><div className={styles.detailLabel}>Rules</div><div className={styles.detailValue}>{scoreFeed.registered.length}</div></div>
           <div className={styles.detailStat}><div className={styles.detailLabel}>Last sync</div><div className={styles.detailValue}>{formatSyncMoment(scoreFeed.lastSyncedAt)}</div></div>
-          <div className={styles.detailStat}><div className={styles.detailLabel}>Alert metric</div><div className={styles.detailValue}>{scoreFeed.registered.length > 0 ? 'grafana_anomaly_rule_score' : 'Waiting for sync'}</div></div>
+          <div className={styles.detailStat}><div className={styles.detailLabel}>Alert metrics</div><div className={styles.detailValue}>{scoreFeed.registered.length > 0 ? 'rule_score + confidence_score' : 'Waiting for sync'}</div></div>
         </div>
         {scoreFeed.registered.length > 0 ? (
           <>
@@ -2614,7 +3634,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
                 className={styles.actionButtonSecondary}
                 onClick={() => setScoreFeedExpanded((current) => !current)}
               >
-                {scoreFeedExpanded ? 'Hide score rules' : 'Show score rules'}
+                {scoreFeedExpanded ? 'Hide synced rules' : 'Show synced rules'}
               </button>
             </div>
             {scoreFeedExpanded ? (
@@ -2688,18 +3708,29 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
   });
 
   const allTimes = allPoints.map((point) => point.time);
+  const uniqueTimes = [...new Set(allTimes)].sort((left, right) => left - right);
   const allValues = allPoints.flatMap((point) => [point.value, point.expected, point.lower, point.upper]).filter((value): value is number => value !== null && Number.isFinite(value));
   const minTime = Math.min(...allTimes);
   const maxTime = Math.max(...allTimes);
+  const dataRangeMs = Math.max(maxTime - minTime, 1);
+  const dashboardRangeMs = Math.max((timeRange.to?.valueOf?.() ?? maxTime) - (timeRange.from?.valueOf?.() ?? minTime), 1);
+  const timeRangeMs = Math.max(dataRangeMs, dashboardRangeMs);
   const minValue = Math.min(...allValues);
   const maxValue = Math.max(...allValues);
   const yPadding = Math.max((maxValue - minValue) * 0.12, Math.abs(maxValue) * 0.03, 1);
   const domainMin = minValue - yPadding;
   const domainMax = maxValue + yPadding;
+  const timeZoneLabel = timeZoneAbbrevation(maxTime, { timeZone }) || (typeof timeZone === 'string' ? timeZone : 'local');
 
   const chartWidth = Math.max(width - 24, 320);
-  const chartHeight = Math.max(Math.min(options.showSummary === false ? height - 72 : height * 0.48, 420), 300);
-  const chartPadding = PADDING;
+  const chartHeight = Math.max(Math.min(options.showSummary === false ? height - 72 : height * 0.54, 500), 340);
+  const chartPadding = {
+    ...PADDING,
+    top: 24,
+    right: resolvedOptions.detectionMode === 'multi' ? 28 : 24,
+    bottom: 54,
+    left: resolvedOptions.detectionMode === 'multi' ? 92 : 84,
+  };
   const innerWidth = Math.max(chartWidth - chartPadding.left - chartPadding.right, 40);
   const innerHeight = Math.max(chartHeight - chartPadding.top - chartPadding.bottom, 40);
 
@@ -2719,25 +3750,44 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
     return chartPadding.top + innerHeight - ((value - domainMin) / (domainMax - domainMin)) * innerHeight;
   };
 
-  const xTickCount =
-    resolvedOptions.detectionMode === 'multi'
-      ? Math.max(3, Math.min(4, Math.ceil(chartWidth / 560)))
-      : Math.max(3, Math.min(5, Math.ceil(chartWidth / 420)));
-  const yTickCount = 4;
+  const getTimeFromX = (x: number): number => {
+    if (maxTime === minTime) {
+      return minTime;
+    }
+
+    const ratio = Math.max(0, Math.min(1, (x - chartPadding.left) / innerWidth));
+    return minTime + ratio * (maxTime - minTime);
+  };
+
+  const xTickCount = getTimeTickCount(chartWidth, resolvedOptions.detectionMode, resolvedOptions.timeAxisDensity, timeRangeMs);
+  const yTickCount = Math.max(5, Math.min(6, Math.round(innerHeight / 72)));
   const xTicks = buildLinearTicks(minTime, maxTime, xTickCount);
+  const topAxisTicks =
+    resolvedOptions.timeAxisPlacement === 'top_and_bottom'
+      ? xTicks.filter((_, index) => index === 0 || index === xTicks.length - 1 || index % Math.max(1, Math.ceil(xTicks.length / 3)) === 0)
+      : [];
   const yTicks = buildLinearTicks(domainMin, domainMax, yTickCount);
-  const eventMarkerGap = Math.max(96, innerWidth / 6.5);
+  const eventMarkerGap = Math.max(64, innerWidth / 10);
   const visibleEvents =
     resolvedOptions.detectionMode === 'multi'
       ? limitMarkerCount(
           selectVisibleMarkers(events.filter((event) => event.isAnomaly), getX, eventMarkerGap, activeSelection?.kind === 'event' ? activeSelection.time : null),
-          6,
+          8,
           activeSelection?.kind === 'event' ? activeSelection.time : null
         )
       : [];
+  const focusBand = resolvedOptions.showFocusBand ? buildFocusBandModel(selectionDetail, analyses, uniqueTimes) : null;
+  const incidentRibbonSegments = buildIncidentRibbonSegments(analyses, events, resolvedOptions.detectionMode, uniqueTimes);
+  const focusBandHeight = focusBand ? Math.max(54, Math.min(76, innerHeight * 0.2)) : 0;
+  const focusBandY = focusBand ? chartPadding.top + innerHeight - focusBandHeight - 10 : chartPadding.top + innerHeight;
+  const plotContentBottom = focusBand ? focusBandY - 8 : chartPadding.top + innerHeight;
+  const inlineSeriesLabels = resolvedOptions.showInlineSeriesLabels
+    ? buildInlineSeriesLabels(analyses, getX, getY, chartPadding.top + 12, plotContentBottom - 10, chartWidth - chartPadding.right - 10)
+    : [];
 
   const bucketSpanLabel = formatEffectiveBucketSpanLabel(resolvedOptions.bucketSpan, effectiveBucketSpanMs);
   const howItWorks = buildHowItWorksText(resolvedOptions, effectiveBucketSpanMs);
+  const inspectorStory = selectionDetail ? buildSignalStory(selectionDetail, resolvedOptions.algorithm) : '';
   const annotationExport = buildAnnotationExport(summaryItems, bucketSpanLabel);
   const alertQuery = buildAlertPromQuery(scoreFeed.registered);
   const alertExport = buildAlertExport(selectionDetail, resolvedOptions, bucketSpanLabel, scoreFeed.registered);
@@ -2746,6 +3796,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
   const selectedRect = selectionDetail
     ? {
         x: getX(selectionDetail.bucketStart),
+        height: Math.max(24, plotContentBottom - chartPadding.top),
         width:
           selectionDetail.bucketEnd > selectionDetail.bucketStart
             ? Math.max(getX(selectionDetail.bucketEnd) - getX(selectionDetail.bucketStart), 10)
@@ -2767,6 +3818,84 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
       centerX: x + width / 2,
     };
   });
+  const plotClipId = `anomaly-plot-${id ?? 'panel'}-${resolvedOptions.detectionMode}`;
+  const axisCaptionColor = theme.isDark ? '#CBD5E1' : '#334155';
+  const axisGutterFill = theme.isDark ? '#0B1628' : '#F8FAFC';
+  const axisLabelFill = theme.isDark ? '#0F1C2D' : '#FFFFFF';
+  const hoverX = hoverSnapshot ? getX(hoverSnapshot.time) : null;
+  const tooltipLeft = hoverX === null ? 0 : Math.max(16, Math.min(hoverX + 18, chartWidth - 290));
+  const tooltipAlignRight = hoverX !== null && hoverX > chartWidth * 0.62;
+  const tooltipStyle = hoverX === null ? undefined : { left: tooltipAlignRight ? undefined : tooltipLeft, right: tooltipAlignRight ? Math.max(14, chartWidth - hoverX + 14) : undefined };
+  const handleChartMouseMove = useCallback(
+    (event: React.MouseEvent<SVGSVGElement>) => {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const svgX = ((event.clientX - bounds.left) / bounds.width) * chartWidth;
+      if (svgX < chartPadding.left || svgX > chartWidth - chartPadding.right) {
+        if (pinnedTime === null) {
+          setHoveredTime(null);
+        }
+        return;
+      }
+
+      const targetTime = getTimeFromX(svgX);
+      const nearestIndex = findNearestTimeIndex(uniqueTimes, targetTime);
+      setHoveredTime(nearestIndex >= 0 ? uniqueTimes[nearestIndex] : null);
+    },
+    [chartPadding.left, chartPadding.right, chartWidth, getTimeFromX, pinnedTime, uniqueTimes]
+  );
+  const handleChartMouseLeave = useCallback(() => {
+    if (pinnedTime === null) {
+      setHoveredTime(null);
+    }
+  }, [pinnedTime]);
+  const handleChartClick = useCallback(() => {
+    if (hoverSnapshot) {
+      setPinnedTime((current) => (current === hoverSnapshot.time ? null : hoverSnapshot.time));
+    }
+  }, [hoverSnapshot]);
+  const handleChartKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (isKeyboardNavigationTarget(event.target) || orderedSummaryItems.length === 0) {
+        return;
+      }
+
+      const activeIndex = orderedSummaryItems.findIndex((item) => selectionKey(item.selection) === activeSelectionToken);
+      const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        const next = orderedSummaryItems[(currentIndex + 1) % orderedSummaryItems.length];
+        selectSummaryItem(next);
+        return;
+      }
+
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const next = orderedSummaryItems[(currentIndex - 1 + orderedSummaryItems.length) % orderedSummaryItems.length];
+        selectSummaryItem(next);
+        return;
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        const selected = orderedSummaryItems[currentIndex];
+        if (!selected) {
+          return;
+        }
+
+        event.preventDefault();
+        setPinnedTime((current) => (current === selected.time ? null : selected.time));
+        setHoveredTime(selected.time);
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPinnedTime(null);
+        setHoveredTime(null);
+      }
+    },
+    [activeSelectionToken, orderedSummaryItems, selectSummaryItem]
+  );
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
@@ -2825,15 +3954,71 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
         </div>
       ) : null}
 
-      <div className={styles.chartCard}>
-        <svg width="100%" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Anomaly chart">
+      <div
+        className={styles.chartCard}
+        tabIndex={0}
+        onKeyDown={handleChartKeyDown}
+        aria-label="Anomaly chart. Use left and right arrows to move between incidents, Enter to pin, and Escape to clear."
+      >
+        <svg
+          width="100%"
+          height={chartHeight}
+          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+          role="img"
+          aria-label="Anomaly chart"
+          onMouseMove={handleChartMouseMove}
+          onMouseLeave={handleChartMouseLeave}
+          onClick={handleChartClick}
+          style={{ cursor: 'crosshair' }}
+        >
+          <defs>
+            <clipPath id={plotClipId}>
+              <rect x={chartPadding.left} y={chartPadding.top} width={innerWidth} height={innerHeight} rx={12} />
+            </clipPath>
+          </defs>
           <rect x={0} y={0} width={chartWidth} height={chartHeight} fill={theme.isDark ? '#08111F' : '#FFFFFF'} />
+          <rect x={8} y={chartPadding.top - 8} width={chartPadding.left - 16} height={innerHeight + 16} rx={16} fill={axisGutterFill} opacity={0.96} />
+          <text transform={`translate(22 ${chartPadding.top + innerHeight / 2}) rotate(-90)`} textAnchor="middle" fill={axisCaptionColor} fontSize="11" fontWeight="700" letterSpacing="0.08em">
+            VALUE
+          </text>
+          <text x={chartWidth - chartPadding.right} y={chartHeight - 16} textAnchor="end" fill={axisCaptionColor} fontSize="11" fontWeight="700" letterSpacing="0.08em">
+            TIME ({timeZoneLabel})
+          </text>
+          {topAxisTicks.map((tick, index) => {
+            const x = getX(tick);
+            const anchor = index === 0 ? 'start' : index === topAxisTicks.length - 1 ? 'end' : 'middle';
+            return (
+              <g key={`top-x-${index}`}>
+                <text x={x} y={chartPadding.top - 10} textAnchor={anchor} fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="10" fontWeight="700">
+                  {formatTimeAxisContextLabel(tick, timeRangeMs, timeZone)}
+                </text>
+              </g>
+            );
+          })}
+          {incidentRibbonSegments.length > 0 ? (
+            <g>
+              <rect x={chartPadding.left + 4} y={chartPadding.top + 8} width={innerWidth - 8} height={10} rx={5} fill={theme.isDark ? '#102033' : '#EEF4FF'} opacity={0.9} />
+              {incidentRibbonSegments.map((segment) => {
+                const start = Math.max(chartPadding.left + 4, getX(segment.start));
+                const end = Math.min(chartWidth - chartPadding.right - 4, getX(segment.end));
+                const width = Math.max(8, end - start);
+                const selected = selectionKey(activeSelection) === selectionKey(segment.selection);
+                const color = SEVERITY_COLORS[segment.severityLabel];
+                return (
+                  <g key={segment.key} style={{ cursor: 'pointer' }} onClick={(event) => { event.stopPropagation(); setSelection(segment.selection); setPinnedTime(segment.center); }}>
+                    <title>{`${segment.label} | ${SEVERITY_LABELS[segment.severityLabel]} ${segment.severityScore} | ${formatTooltipTime(segment.center, timeRangeMs, timeZone)}`}</title>
+                    <rect x={start} y={chartPadding.top + 8} width={width} height={10} rx={5} fill={color} fillOpacity={selected ? 0.98 : 0.78} stroke={selected ? (theme.isDark ? '#FFFFFF' : '#0F172A') : 'none'} strokeWidth={selected ? 1.2 : 0} />
+                  </g>
+                );
+              })}
+            </g>
+          ) : null}
           {selectedRect ? (
             <rect
               x={Math.max(chartPadding.left, selectedRect.x)}
               y={chartPadding.top}
               width={Math.min(selectedRect.width, innerWidth)}
-              height={innerHeight}
+              height={selectedRect.height}
               fill={theme.isDark ? 'rgba(59,130,246,0.10)' : 'rgba(37,99,235,0.08)'}
               stroke={theme.isDark ? 'rgba(96,165,250,0.35)' : 'rgba(37,99,235,0.25)'}
               rx={8}
@@ -2845,8 +4030,9 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
             return (
               <g key={`y-${index}`}>
                 <line x1={chartPadding.left} y1={y} x2={chartWidth - chartPadding.right} y2={y} stroke={theme.isDark ? '#1E293B' : '#E2E8F0'} strokeOpacity={0.78} strokeDasharray="3 6" />
-                <text x={chartPadding.left - 10} y={y + 4} textAnchor="end" fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="11">
-                  {formatValue(tick)}
+                <rect x={14} y={y - 10} width={chartPadding.left - 28} height={20} rx={10} fill={axisLabelFill} opacity={theme.isDark ? 0.84 : 0.96} />
+                <text x={chartPadding.left - 18} y={y + 4} textAnchor="end" fill={theme.isDark ? '#E2E8F0' : '#0F172A'} fontSize="12" fontWeight="700">
+                  {formatAxisValue(tick)}
                 </text>
               </g>
             );
@@ -2860,75 +4046,348 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
                   <line x1={x} y1={chartPadding.top} x2={x} y2={chartHeight - chartPadding.bottom} stroke={theme.isDark ? '#162336' : '#E2E8F0'} strokeOpacity={0.45} />
                 ) : null}
                 <text x={x} y={chartHeight - 12} textAnchor={anchor} fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="11">
-                  {formatTime(tick)}
+                  {formatTimeAxisLabel(tick, timeRangeMs, resolvedOptions.timeAxisDensity, timeZone)}
                 </text>
               </g>
             );
           })}
+          {hoverX !== null ? (
+            <g pointerEvents="none">
+              <line
+                x1={hoverX}
+                y1={chartPadding.top}
+                x2={hoverX}
+                y2={plotContentBottom}
+                stroke={theme.isDark ? '#93C5FD' : '#2563EB'}
+                strokeDasharray="5 5"
+                strokeOpacity={0.72}
+                strokeWidth={1.35}
+              />
+              <rect
+                x={Math.max(chartPadding.left + 6, Math.min(hoverX - 52, chartWidth - chartPadding.right - 104))}
+                y={chartPadding.top + 24}
+                width={104}
+                height={20}
+                rx={10}
+                fill={theme.isDark ? '#0F172A' : '#FFFFFF'}
+                stroke={theme.isDark ? '#334155' : '#CBD5E1'}
+              />
+              <text
+                x={Math.max(chartPadding.left + 58, Math.min(hoverX, chartWidth - chartPadding.right - 52))}
+                y={chartPadding.top + 38}
+                textAnchor="middle"
+                fill={theme.isDark ? '#E2E8F0' : '#0F172A'}
+                fontSize="11"
+                fontWeight="700"
+              >
+                {formatTimeAxisLabel(hoverSnapshot?.time ?? minTime, timeRangeMs, 'dense', timeZone)}
+              </text>
+            </g>
+          ) : null}
           {resolvedOptions.detectionMode === 'multi' && visibleEventBands.length > 0 ? (
             <g>
               {visibleEventBands.map(({ event, x, width, centerX }) => {
                 const selected = activeSelection?.kind === 'event' && activeSelection.time === event.time;
                 const tint = SEVERITY_COLORS[event.severityLabel];
+                const markerShape = getSeverityMarkerShape(event.severityLabel, resolvedOptions.markerShapeMode);
+                const confidenceOpacity = event.confidenceLabel === 'high' ? 0.18 : event.confidenceLabel === 'medium' ? 0.12 : 0.08;
+                const markerY = chartPadding.top + 18;
                 return (
-                  <g key={`event-${event.time}`} style={{ cursor: 'pointer' }} onClick={() => setSelection({ kind: 'event', time: event.time })}>
-                    <title>{`Combined anomaly at ${formatTime(event.time)} | Score ${formatValue(event.score)} | ${SEVERITY_LABELS[event.severityLabel]}`}</title>
-                    <rect x={x} y={chartPadding.top + 1} width={width} height={innerHeight - 2} rx={selected ? 10 : 8} fill={tint} fillOpacity={selected ? 0.14 : 0.05} />
-                    <rect x={x} y={chartPadding.top + 4} width={width} height={4} rx={2} fill={tint} fillOpacity={selected ? 0.9 : 0.5} />
-                    <rect x={x} y={chartPadding.top + innerHeight - 6} width={width} height={3} rx={1.5} fill={tint} fillOpacity={selected ? 0.8 : 0.42} />
-                    {selected ? (
-                      <line
-                        x1={centerX}
-                        y1={chartPadding.top + 10}
-                        x2={centerX}
-                        y2={chartPadding.top + innerHeight - 10}
-                        stroke={tint}
-                        strokeOpacity={0.68}
-                        strokeWidth={1.4}
-                        strokeDasharray="4 5"
-                      />
-                    ) : null}
+                  <g
+                    key={`event-${event.time}`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setSelection({ kind: 'event', time: event.time });
+                      setPinnedTime(event.time);
+                    }}
+                  >
+                    <title>{`Combined anomaly at ${formatTime(event.time)} | Score ${formatValue(event.score)} | ${SEVERITY_LABELS[event.severityLabel]} | ${CONFIDENCE_LABELS[event.confidenceLabel]}`}</title>
+                    <rect x={x} y={chartPadding.top + 1} width={width} height={innerHeight - 2} rx={selected ? 10 : 8} fill={tint} fillOpacity={selected ? 0.18 : confidenceOpacity} />
+                    <rect x={x} y={chartPadding.top + 4} width={width} height={4} rx={2} fill={tint} fillOpacity={selected ? 0.95 : event.confidenceLabel === 'high' ? 0.8 : 0.62} />
+                    <rect x={x} y={chartPadding.top + innerHeight - 6} width={width} height={3} rx={1.5} fill={tint} fillOpacity={selected ? 0.9 : event.confidenceLabel === 'high' ? 0.72 : 0.5} />
+                    <line
+                      x1={centerX}
+                      y1={markerY + 8}
+                      x2={centerX}
+                      y2={plotContentBottom - 8}
+                      stroke={tint}
+                      strokeOpacity={selected ? 0.74 : 0.38}
+                      strokeWidth={selected ? 1.8 : 1.25}
+                      strokeDasharray="4 5"
+                    />
+                    {renderMarkerGlyph(
+                      markerShape,
+                      centerX,
+                      markerY,
+                      selected ? 7.5 : 6.2,
+                      theme.isDark ? '#08111F' : '#FFFFFF',
+                      tint,
+                      selected ? 2.8 : 2.2
+                    )}
+                    {renderMarkerGlyph(markerShape, centerX, markerY, selected ? 3 : 2.5, tint)}
                   </g>
                 );
               })}
             </g>
           ) : null}
+          <g clipPath={`url(#${plotClipId})`}>
           {analyses.map((analysis) => {
             const areaPath = options.showBands === false ? '' : buildAreaPath(analysis.points, getX, getY);
             const actualPath = buildLinePath(analysis.points, getX, getY, (point) => point.value);
             const expectedPath = resolvedOptions.showExpectedLine ? buildLinePath(analysis.points, getX, getY, (point) => point.expected) : '';
             const selectedPointTime = activeSelection?.kind === 'point' && activeSelection.seriesKey === analysis.key ? activeSelection.time : null;
+            const markerShapeMode = resolvedOptions.markerShapeMode;
             const visiblePoints =
               resolvedOptions.detectionMode === 'multi'
                 ? []
-                : selectVisibleMarkers(analysis.points.filter((point) => point.isAnomaly), getX, Math.max(18, innerWidth / 28), selectedPointTime);
+                : selectVisibleMarkers(analysis.points.filter((point) => point.isAnomaly), getX, Math.max(12, innerWidth / 44), selectedPointTime);
             return (
               <g key={analysis.key}>
                 {areaPath ? <path d={areaPath} fill={analysis.color} opacity={selectionDetail && selectionDetail.kind === 'point' && selectionDetail.seriesKey === analysis.key ? 0.14 : 0.07} /> : null}
                 {expectedPath ? <path d={expectedPath} fill="none" stroke={analysis.color} strokeOpacity={0.32} strokeWidth={1.3} strokeDasharray="6 6" /> : null}
-                <path d={actualPath} fill="none" stroke={analysis.color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+                <path d={actualPath} fill="none" stroke={analysis.color} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
                 {visiblePoints.map((point) => {
                   const selected = activeSelection?.kind === 'point' && activeSelection.seriesKey === analysis.key && activeSelection.time === point.time;
+                  const x = getX(point.time);
+                  const y = getY(point.value);
+                  const markerShape = getSeverityMarkerShape(point.severityLabel, markerShapeMode);
+                  const haloRadius = selected ? 11 : point.confidenceLabel === 'high' ? 8.4 : point.confidenceLabel === 'medium' ? 7.4 : 6.2;
                   return (
-                    <g key={`${analysis.key}-${point.time}`} style={{ cursor: 'pointer' }} onClick={() => setSelection({ kind: 'point', seriesKey: analysis.key, time: point.time })}>
-                      <circle cx={getX(point.time)} cy={getY(point.value)} r={selected ? 6.5 : 4.8} fill={theme.isDark ? '#111827' : '#FFFFFF'} stroke={SEVERITY_COLORS[point.severityLabel]} strokeWidth={selected ? 2.6 : 2.2} />
-                      <circle cx={getX(point.time)} cy={getY(point.value)} r={10} fill="transparent" />
+                    <g
+                      key={`${analysis.key}-${point.time}`}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setSelection({ kind: 'point', seriesKey: analysis.key, time: point.time });
+                        setPinnedTime(point.time);
+                      }}
+                    >
+                      <title>{`${analysis.label} | ${formatTime(point.time)} | ${SEVERITY_LABELS[point.severityLabel]} | ${CONFIDENCE_LABELS[point.confidenceLabel]}`}</title>
+                      <line
+                        x1={x}
+                        y1={chartPadding.top + 18}
+                        x2={x}
+                        y2={Math.max(chartPadding.top + 26, y - 10)}
+                        stroke={SEVERITY_COLORS[point.severityLabel]}
+                        strokeOpacity={selected ? 0.72 : 0.3}
+                        strokeWidth={selected ? 1.7 : 1.2}
+                        strokeDasharray="4 5"
+                      />
+                      <circle cx={x} cy={y} r={haloRadius} fill={CONFIDENCE_COLORS[point.confidenceLabel]} opacity={selected ? 0.28 : 0.18} />
+                      {renderMarkerGlyph(
+                        markerShape,
+                        x,
+                        y,
+                        selected ? 7.2 : 5.4,
+                        theme.isDark ? '#111827' : '#FFFFFF',
+                        SEVERITY_COLORS[point.severityLabel],
+                        selected ? 2.8 : 2.4
+                      )}
+                      {renderMarkerGlyph(markerShape, x, y, selected ? 3.2 : 2.6, SEVERITY_COLORS[point.severityLabel], undefined, 0, point.confidenceLabel === 'high' ? 0.96 : 0.8)}
+                      <circle cx={x} cy={y} r={11} fill="transparent" />
                     </g>
                   );
                 })}
               </g>
             );
           })}
+          </g>
+          {inlineSeriesLabels.map((label) => {
+            const labelLeft = Math.max(chartPadding.left + 8, label.anchorX - label.width);
+            const connectorEndX = labelLeft - 8;
+            return (
+              <g key={`inline-${label.key}`}>
+                <line
+                  x1={label.lastX}
+                  y1={label.lastY}
+                  x2={connectorEndX}
+                  y2={label.labelY}
+                  stroke={label.color}
+                  strokeOpacity={0.78}
+                  strokeWidth={1.4}
+                />
+                <rect
+                  x={labelLeft}
+                  y={label.labelY - 11}
+                  width={label.width}
+                  height={22}
+                  rx={11}
+                  fill={theme.isDark ? '#0F172A' : '#FFFFFF'}
+                  stroke={label.color}
+                  strokeOpacity={0.48}
+                />
+                <circle cx={labelLeft + 11} cy={label.labelY} r={3} fill={label.color} />
+                <text x={labelLeft + 19} y={label.labelY + 4} fill={theme.isDark ? '#E2E8F0' : '#0F172A'} fontSize="11" fontWeight="700">
+                  {label.label}
+                </text>
+              </g>
+            );
+          })}
+          {focusBand ? (() => {
+            const focusInset = 14;
+            const focusX = chartPadding.left + focusInset;
+            const focusWidth = Math.max(innerWidth - focusInset * 2, 48);
+            const focusY = focusBandY;
+            const focusInnerHeight = Math.max(focusBandHeight - 28, 18);
+            const focusMin = focusBand.minValue;
+            const focusMax = focusBand.maxValue;
+            const focusSpread = Math.max(focusMax - focusMin, 1e-6);
+            const focusGetX = (time: number) => focusX + ((time - focusBand.startTime) / Math.max(focusBand.endTime - focusBand.startTime, 1)) * focusWidth;
+            const focusGetY = (value: number) => focusY + 18 + focusInnerHeight - ((value - focusMin) / focusSpread) * focusInnerHeight;
+            const selectedBandStart = focusGetX(focusBand.bucketStart);
+            const selectedBandEnd = focusGetX(Math.max(focusBand.bucketEnd, focusBand.selectedTime));
+            return (
+              <g>
+                <rect
+                  x={chartPadding.left + 6}
+                  y={focusY}
+                  width={innerWidth - 12}
+                  height={focusBandHeight}
+                  rx={14}
+                  fill={theme.isDark ? 'rgba(8,17,31,0.92)' : 'rgba(255,255,255,0.94)'}
+                  stroke={theme.isDark ? '#1E293B' : '#D7E3F4'}
+                />
+                <text x={focusX} y={focusY + 14} fill={theme.isDark ? '#CBD5E1' : '#334155'} fontSize="10" fontWeight="700" letterSpacing="0.08em">
+                  FOCUSED ANOMALY WINDOW
+                </text>
+                <text x={chartWidth - chartPadding.right - 8} y={focusY + 14} textAnchor="end" fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="10" fontWeight="700">
+                  {focusBand.title}
+                </text>
+                <rect
+                  x={Math.min(selectedBandStart, selectedBandEnd)}
+                  y={focusY + 18}
+                  width={Math.max(Math.abs(selectedBandEnd - selectedBandStart), 8)}
+                  height={focusInnerHeight}
+                  rx={8}
+                  fill={theme.isDark ? 'rgba(59,130,246,0.14)' : 'rgba(37,99,235,0.10)'}
+                  stroke={theme.isDark ? 'rgba(96,165,250,0.28)' : 'rgba(37,99,235,0.22)'}
+                />
+                {focusBand.series.map((series) => {
+                  const focusPath = buildLinePath(series.points, focusGetX, focusGetY, (point) => point.value);
+                  return <path key={`focus-${series.key}`} d={focusPath} fill="none" stroke={series.color} strokeWidth={1.8} strokeOpacity={activeSelection?.kind === 'point' && activeSelection.seriesKey === series.key ? 1 : 0.78} strokeLinecap="round" strokeLinejoin="round" />;
+                })}
+                <line x1={focusGetX(focusBand.selectedTime)} y1={focusY + 18} x2={focusGetX(focusBand.selectedTime)} y2={focusY + 18 + focusInnerHeight} stroke={theme.isDark ? '#93C5FD' : '#2563EB'} strokeDasharray="4 4" strokeWidth={1.4} />
+                <text x={focusX} y={focusY + focusBandHeight - 8} fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="10">
+                  {formatTimeAxisLabel(focusBand.startTime, focusBand.endTime - focusBand.startTime, 'dense', timeZone)}
+                </text>
+                <text x={focusGetX(focusBand.selectedTime)} y={focusY + focusBandHeight - 8} textAnchor="middle" fill={theme.isDark ? '#E2E8F0' : '#0F172A'} fontSize="10" fontWeight="700">
+                  {formatTimeAxisLabel(focusBand.selectedTime, focusBand.endTime - focusBand.startTime, 'dense', timeZone)}
+                </text>
+                <text x={chartWidth - chartPadding.right - 8} y={focusY + focusBandHeight - 8} textAnchor="end" fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="10">
+                  {formatTimeAxisLabel(focusBand.endTime, focusBand.endTime - focusBand.startTime, 'dense', timeZone)}
+                </text>
+              </g>
+            );
+          })() : null}
           <rect x={chartPadding.left} y={chartPadding.top} width={innerWidth} height={innerHeight} rx={12} fill="none" stroke={theme.isDark ? '#22314A' : '#D7E3F4'} />
         </svg>
+        {hoverSnapshot ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 18,
+              ...(tooltipStyle ?? {}),
+              width: 272,
+              pointerEvents: pinnedTime !== null ? 'auto' : 'none',
+              borderRadius: 16,
+              border: `1px solid ${theme.isDark ? '#334155' : '#CBD5E1'}`,
+              background: theme.isDark ? 'rgba(8,17,31,0.96)' : 'rgba(255,255,255,0.96)',
+              boxShadow: theme.isDark ? '0 18px 42px rgba(2,6,23,0.42)' : '0 18px 42px rgba(15,23,42,0.12)',
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: theme.isDark ? '#F8FAFC' : '#0F172A' }}>
+                  {formatTooltipTime(hoverSnapshot.time, timeRangeMs, timeZone)}
+                </div>
+                <div style={{ fontSize: 11, color: theme.isDark ? '#94A3B8' : '#64748B' }}>
+                  {hoverSnapshot.event?.isAnomaly
+                    ? `Cross-metric incident | ${hoverSnapshot.event.activeSeries} aligned metric${hoverSnapshot.event.activeSeries === 1 ? '' : 's'}`
+                    : hoverSnapshot.anomalyCount > 0
+                      ? `${hoverSnapshot.anomalyCount} flagged signal${hoverSnapshot.anomalyCount === 1 ? '' : 's'} at this time`
+                      : 'Live metric snapshot'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    borderRadius: 999,
+                    padding: '4px 8px',
+                    fontSize: 10,
+                    fontWeight: 800,
+                    background: `${SEVERITY_COLORS[hoverSnapshot.severityLabel]}22`,
+                    color: SEVERITY_COLORS[hoverSnapshot.severityLabel],
+                  }}
+                >
+                  {SEVERITY_LABELS[hoverSnapshot.severityLabel]} {hoverSnapshot.severityScore}
+                </span>
+                {pinnedTime !== null ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPinnedTime(null);
+                    }}
+                    style={{
+                      border: `1px solid ${theme.isDark ? '#334155' : '#CBD5E1'}`,
+                      background: theme.isDark ? '#0F172A' : '#F8FAFC',
+                      color: theme.isDark ? '#E2E8F0' : '#334155',
+                      borderRadius: 999,
+                      padding: '4px 8px',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Unpin
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {hoverSnapshot.series.slice(0, 4).map((series) => (
+                <div
+                  key={`tooltip-${series.key}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0,1fr) auto auto',
+                    gap: 8,
+                    alignItems: 'center',
+                    padding: '6px 8px',
+                    borderRadius: 12,
+                    background: theme.isDark ? 'rgba(15,23,42,0.72)' : '#F8FAFC',
+                    border: `1px solid ${theme.isDark ? '#1E293B' : '#E2E8F0'}`,
+                  }}
+                >
+                  <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: series.color, flex: '0 0 auto' }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: theme.isDark ? '#E2E8F0' : '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {truncateLabel(series.label, 24)}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: theme.isDark ? '#F8FAFC' : '#0F172A' }}>{formatValue(series.actual)}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: series.isAnomaly ? SEVERITY_COLORS[series.severityLabel] : theme.isDark ? '#94A3B8' : '#64748B' }}>
+                    {series.isAnomaly ? SEVERITY_LABELS[series.severityLabel] : 'normal'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className={styles.legend}>
         {analyses.map((analysis) => (
-          <div key={analysis.key} className={styles.legendItem} title={`${analysis.label} | ${analysis.anomalyCount} anomalies | max ${formatValue(analysis.maxScore)}`}>
+          <div key={analysis.key} className={styles.legendItem} title={`${analysis.label} | ${analysis.anomalyCount} flagged buckets | max ${formatValue(analysis.maxScore)}`}>
             <span className={styles.legendSwatch} style={{ background: analysis.color }} />
             <span>
-              {analysis.label} | {analysis.anomalyCount} anomalies | max {formatValue(analysis.maxScore)}
+              {analysis.label} | {analysis.anomalyCount} flagged buckets | max {formatValue(analysis.maxScore)}
             </span>
           </div>
         ))}
@@ -2939,17 +4398,72 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
       {options.showSummary !== false ? (
         <div className={styles.grid}>
           <div className={styles.card}>
-            <div className={styles.cardTitle}>Top anomalies</div>
+            <div className={styles.cardTitle}>Detected incidents</div>
+            {orderedSummaryItems.length > 0 ? (
+              <div className={styles.summaryTimeline}>
+                <div className={styles.subtitle}>Incident timeline</div>
+                <svg width="100%" height="56" viewBox="0 0 320 56" role="img" aria-label="Incident timeline overview">
+                  <line x1={18} y1={28} x2={302} y2={28} stroke={theme.isDark ? '#22314A' : '#CBD5E1'} strokeWidth={4} strokeLinecap="round" />
+                  {orderedSummaryItems.map((item, index) => {
+                    const x =
+                      maxTime === minTime ? 160 : 18 + ((item.time - minTime) / Math.max(maxTime - minTime, 1)) * (302 - 18);
+                    const selected = selectionKey(item.selection) === activeSelectionToken;
+                    const markerShape = getSeverityMarkerShape(item.severityLabel, resolvedOptions.markerShapeMode);
+                    return (
+                      <g
+                        key={`summary-timeline-${item.key}`}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => selectSummaryItem(item)}
+                      >
+                        <title>{`${item.title} | ${formatTooltipTime(item.time, timeRangeMs, timeZone)}`}</title>
+                        <line
+                          x1={x}
+                          y1={16}
+                          x2={x}
+                          y2={40}
+                          stroke={SEVERITY_COLORS[item.severityLabel]}
+                          strokeOpacity={selected ? 0.85 : 0.4}
+                          strokeWidth={selected ? 2 : 1.3}
+                        />
+                        {renderMarkerGlyph(
+                          markerShape,
+                          x,
+                          28,
+                          selected ? 7 : 5.4,
+                          theme.isDark ? '#08111F' : '#FFFFFF',
+                          SEVERITY_COLORS[item.severityLabel],
+                          selected ? 2.5 : 2
+                        )}
+                        {selected ? (
+                          <circle cx={x} cy={28} r={10.5} fill="none" stroke={theme.isDark ? '#E2E8F0' : '#0F172A'} strokeOpacity={0.4} strokeWidth={1.3} />
+                        ) : null}
+                        {index === 0 ? (
+                          <text x={x} y={50} textAnchor="start" fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="10" fontWeight="700">
+                            {formatTimeAxisLabel(item.time, timeRangeMs, 'compact', timeZone)}
+                          </text>
+                        ) : index === orderedSummaryItems.length - 1 ? (
+                          <text x={x} y={50} textAnchor="end" fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="10" fontWeight="700">
+                            {formatTimeAxisLabel(item.time, timeRangeMs, 'compact', timeZone)}
+                          </text>
+                        ) : null}
+                      </g>
+                    );
+                  })}
+                </svg>
+                <div className={styles.summaryTimelineHint}>Keyboard: Left/right arrows move between incidents, Enter pins the current view, Esc clears the pin.</div>
+              </div>
+            ) : null}
             <div className={styles.summaryList}>
               {summaryItems.length === 0 ? (
-                <div className={styles.subtitle}>No anomalies crossed the active threshold in the selected time range.</div>
+                <div className={styles.subtitle}>No operationally relevant incidents crossed the active threshold in the selected time range.</div>
               ) : (
                 summaryItems.map((item) => (
                   <button
                     key={item.key}
                     type="button"
-                    className={`${styles.summaryRow} ${selectionKey(selection) === selectionKey(item.selection) ? styles.summaryRowSelected : ''}`}
-                    onClick={() => setSelection(item.selection)}
+                    aria-label={`Detected incident ${item.title}`}
+                    className={`${styles.summaryRow} ${activeSelectionToken === selectionKey(item.selection) ? styles.summaryRowSelected : ''}`}
+                    onClick={() => selectSummaryItem(item)}
                     style={{ textAlign: 'left', color: 'inherit' }}
                   >
                     <div className={styles.summaryMeta}>
@@ -2967,11 +4481,12 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
           </div>
 
           <div className={styles.card}>
-            <div className={styles.cardTitle}>Selected anomaly</div>
+            <div className={styles.cardTitle}>Anomaly inspector</div>
             {selectionDetail ? (
               <>
                 <div className={styles.recommendationText}>{selectionDetail.title}</div>
                 <div className={styles.subtitle}>{selectionDetail.subtitle}</div>
+                <div className={styles.recommendationText}>{inspectorStory}</div>
                 <div className={styles.actionRow}>
                   <button
                     type="button"
@@ -3025,7 +4540,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
                 {!dashboardUid ? <div className={styles.subtitle}>Save the dashboard once so Grafana knows which dashboard the new annotation belongs to.</div> : null}
                 <div className={styles.detailGrid}>
                   <div className={styles.detailStat}>
-                    <div className={styles.detailLabel}>Score</div>
+                    <div className={styles.detailLabel}>Detection strength</div>
                     <div className={styles.detailValue}>{formatValue(selectionDetail.score)}</div>
                   </div>
                   <div className={styles.detailStat}>
@@ -3033,51 +4548,106 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
                     <div className={styles.detailValue} style={{ color: SEVERITY_COLORS[selectionDetail.severityLabel] }}>{SEVERITY_LABELS[selectionDetail.severityLabel]} {selectionDetail.severityScore}</div>
                   </div>
                   <div className={styles.detailStat}>
+                    <div className={styles.detailLabel}>Confidence</div>
+                    <div className={styles.detailValue} style={{ color: CONFIDENCE_COLORS[selectionDetail.confidenceLabel] }}>{CONFIDENCE_LABELS[selectionDetail.confidenceLabel]}</div>
+                  </div>
+                  <div className={styles.detailStat}>
+                    <div className={styles.detailLabel}>Data quality</div>
+                    <div className={styles.detailValue}>{DATA_QUALITY_LABELS[selectionDetail.dataQualityLabel]}</div>
+                  </div>
+                  <div className={styles.detailStat}>
                     <div className={styles.detailLabel}>Bucket span</div>
                     <div className={styles.detailValue}>{formatBucketWindow(selectionDetail.bucketStart, selectionDetail.bucketEnd)}</div>
                   </div>
                   <div className={styles.detailStat}>
-                    <div className={styles.detailLabel}>Guidance</div>
+                    <div className={styles.detailLabel}>Recommended action</div>
                     <div className={styles.detailValue}>{buildAlertGuidance(selectionDetail, resolvedOptions.severityPreset)}</div>
                   </div>
                 </div>
                 {selectionDetail.kind === 'point' ? (
                   <div className={styles.detailGrid}>
-                    <div className={styles.detailStat}><div className={styles.detailLabel}>Actual</div><div className={styles.detailValue}>{formatValue(selectionDetail.actual)}</div></div>
-                    <div className={styles.detailStat}><div className={styles.detailLabel}>Expected</div><div className={styles.detailValue}>{formatValue(selectionDetail.expected)}</div></div>
-                    <div className={styles.detailStat}><div className={styles.detailLabel}>Deviation</div><div className={styles.detailValue}>{formatValue(selectionDetail.deviation)}</div></div>
-                    <div className={styles.detailStat}><div className={styles.detailLabel}>Deviation %</div><div className={styles.detailValue}>{formatPercent(selectionDetail.deviationPercent)}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Current value</div><div className={styles.detailValue}>{formatValue(selectionDetail.actual)}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Expected value</div><div className={styles.detailValue}>{formatValue(selectionDetail.expected)}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Change</div><div className={styles.detailValue}>{formatValue(selectionDetail.deviation)}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Change %</div><div className={styles.detailValue}>{formatPercent(selectionDetail.deviationPercent)}</div></div>
                     <div className={styles.detailStat}><div className={styles.detailLabel}>Expected range</div><div className={styles.detailValue}>{formatRange(selectionDetail.rangeLower, selectionDetail.rangeUpper)}</div></div>
                     <div className={styles.detailStat}><div className={styles.detailLabel}>Samples in bucket</div><div className={styles.detailValue}>{selectionDetail.sampleCount}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Instant signal</div><div className={styles.detailValue}>{formatValue(selectionDetail.pointScore)}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Sustained signal</div><div className={styles.detailValue}>{formatValue(selectionDetail.windowScore)}</div></div>
+                    <div className={styles.detailStat}><div className={styles.detailLabel}>Main reason</div><div className={styles.detailValue}>{getDriverLabel(selectionDetail.scoreDriver, resolvedOptions.algorithm)}</div></div>
                   </div>
                 ) : (
-                  <div className={styles.detailTable}>
-                    <div className={`${styles.detailRow} ${styles.detailHeaderRow}`}>
-                      <span>Metric</span>
-                      <span>Actual</span>
-                      <span>Expected</span>
-                      <span>Deviation</span>
-                      <span>Score</span>
-                    </div>
+                  <div className={styles.metricBreakdownList}>
+                    <div className={styles.subtitle}>Metric breakdown</div>
                     {selectionDetail.breakdown.map((row) => (
-                      <div key={row.label} className={styles.detailRow}>
-                        <span style={{ color: row.color, fontWeight: 700 }}>{row.label}</span>
-                        <span>{formatValue(row.actual)}</span>
-                        <span>{formatValue(row.expected)}</span>
-                        <span>{formatValue(row.deviation)}</span>
-                        <span style={{ color: SEVERITY_COLORS[row.severityLabel] }}>{formatValue(row.score)}</span>
+                      <div
+                        key={row.label}
+                        className={styles.metricBreakdownCard}
+                        style={{
+                          borderColor: theme.isDark ? `${row.color}55` : `${row.color}66`,
+                        }}
+                      >
+                        <div className={styles.metricBreakdownHeader}>
+                          <div>
+                            <div className={styles.metricBreakdownTitle} style={{ color: row.color }}>
+                              {row.label}
+                            </div>
+                            <div className={styles.metricBreakdownReason}>
+                              {getDriverLabel(row.scoreDriver, resolvedOptions.algorithm)} | {CONFIDENCE_LABELS[row.confidenceLabel]}
+                            </div>
+                          </div>
+                          <span
+                            className={styles.severityBadge}
+                            style={{
+                              background: `${SEVERITY_COLORS[row.severityLabel]}22`,
+                              color: SEVERITY_COLORS[row.severityLabel],
+                            }}
+                          >
+                            {SEVERITY_LABELS[row.severityLabel]} {row.severityScore}
+                          </span>
+                        </div>
+                        <div className={styles.metricBreakdownGrid}>
+                          <div className={styles.metricBreakdownStat}>
+                            <div className={styles.metricBreakdownStatLabel}>Current</div>
+                            <div className={styles.metricBreakdownStatValue}>{formatValue(row.actual)}</div>
+                          </div>
+                          <div className={styles.metricBreakdownStat}>
+                            <div className={styles.metricBreakdownStatLabel}>Expected</div>
+                            <div className={styles.metricBreakdownStatValue}>{formatValue(row.expected)}</div>
+                          </div>
+                          <div className={styles.metricBreakdownStat}>
+                            <div className={styles.metricBreakdownStatLabel}>Change</div>
+                            <div className={styles.metricBreakdownStatValue}>{formatValue(row.deviation)}</div>
+                          </div>
+                          <div className={styles.metricBreakdownStat}>
+                            <div className={styles.metricBreakdownStatLabel}>Main reason</div>
+                            <div className={styles.metricBreakdownStatValue}>{getDriverLabel(row.scoreDriver, resolvedOptions.algorithm)}</div>
+                          </div>
+                          <div className={styles.metricBreakdownStat}>
+                            <div className={styles.metricBreakdownStatLabel}>Confidence</div>
+                            <div className={styles.metricBreakdownStatValue} style={{ color: CONFIDENCE_COLORS[row.confidenceLabel] }}>
+                              {CONFIDENCE_LABELS[row.confidenceLabel]}
+                            </div>
+                          </div>
+                          <div className={styles.metricBreakdownStat}>
+                            <div className={styles.metricBreakdownStatLabel}>Strength</div>
+                            <div className={styles.metricBreakdownStatValue} style={{ color: SEVERITY_COLORS[row.severityLabel] }}>
+                              {formatValue(row.score)}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
               </>
             ) : (
-              <div className={styles.subtitle}>Click an anomaly marker or a row from Top anomalies to inspect expected value, deviation, and bucket details.</div>
+              <div className={styles.subtitle}>Select a detected incident to see why it was flagged, how strong the signal is, and whether it is ready for alerting.</div>
             )}
           </div>
 
           <div className={styles.card}>
-            <div className={styles.cardTitle}>How it works</div>
+            <div className={styles.cardTitle}>Active detection profile</div>
             <div className={styles.recommendationText}>{howItWorks}</div>
             <div className={styles.detailGrid}>
               <div className={styles.detailStat}><div className={styles.detailLabel}>Setup mode</div><div className={styles.detailValue}>{SETUP_MODE_LABELS[resolvedOptions.setupMode]}</div></div>
@@ -3094,8 +4664,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height 
               <div className={`${styles.card} ${styles.wideCard}`}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0, flex: '1 1 320px' }}>
-                    <div className={styles.cardTitle}>Operational exports</div>
-                    <div className={styles.subtitle}>Hidden by default to keep the dashboard clean. Expand only when you need annotation payloads or a copy-paste alert query.</div>
+                    <div className={styles.cardTitle}>Alerting & automation</div>
+                    <div className={styles.subtitle}>Hidden by default to keep the dashboard clean. Expand only when you need annotation payloads, alert queries, or operational handoff JSON.</div>
                   </div>
                   <button
                     type="button"

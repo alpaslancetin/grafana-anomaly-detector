@@ -1,0 +1,559 @@
+{
+  "target_dynamic_rules": 350,
+  "duration_seconds": 75,
+  "sample_interval_seconds": 15,
+  "samples": [
+    {
+      "timestamp": 1774701258.4998126,
+      "grafana_health": {
+        "database": "ok",
+        "version": "12.4.1",
+        "commit": "46a02dc12a085445ab105b72fa159248f7d1dc9d",
+        "enterpriseCommit": "3b8a4056689b99185a3b7a3c13c50b3b4ef891c3"
+      },
+      "grafana_health_latency_seconds": 0.005,
+      "exporter_metrics_latency_seconds": 0.012,
+      "dynamic_rule_count": 350.0,
+      "config_rule_count": 353.0,
+      "last_scrape_success": 1.0,
+      "evaluation_duration_seconds": 0.859563,
+      "prometheus_queries": [
+        {
+          "name": "rule_score_count",
+          "expr": "count(grafana_anomaly_rule_score)",
+          "value": 353.0,
+          "latency_seconds": 0.0046
+        },
+        {
+          "name": "series_score_count",
+          "expr": "count(grafana_anomaly_score)",
+          "value": 474.0,
+          "latency_seconds": 0.0091
+        }
+      ],
+      "alert_queries": [
+        {
+          "name": "alert_ready_signal",
+          "expr": "max_over_time(grafana_anomaly_rule_score[5m])",
+          "value": 100.0,
+          "latency_seconds": 0.0198
+        }
+      ],
+      "dashboard_checks": [
+        {
+          "name": "demo_dashboard_page",
+          "url": "http://localhost:3000/d/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&from=now-6h&to=now",
+          "status": 200,
+          "latency_seconds": 0.0233,
+          "ok": true
+        }
+      ],
+      "render_checks": [
+        {
+          "name": "demo_panel_render",
+          "url": "http://localhost:3000/render/d-solo/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&panelId=1&from=now-6h&to=now&width=1200&height=700",
+          "status": 200,
+          "latency_seconds": 0.0167,
+          "ok": true
+        }
+      ],
+      "processes": [
+        {
+          "pid": 254,
+          "cpu_percent": 1.6,
+          "mem_percent": 2.9,
+          "rss_kb": 238436,
+          "command": "/usr/share/grafana/bin/grafana server --config=/etc/grafana/grafana.ini --pidfile=/run/grafana/grafana-server.pid --packaging=deb cfg:default.paths.logs=/var/log/grafana cfg:default.paths.data=/var/lib/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 278,
+          "cpu_percent": 0.4,
+          "mem_percent": 0.9,
+          "rss_kb": 78024,
+          "command": "/usr/bin/prometheus"
+        },
+        {
+          "pid": 1942,
+          "cpu_percent": 1.2,
+          "mem_percent": 2.6,
+          "rss_kb": 215316,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=2d"
+        },
+        {
+          "pid": 1944,
+          "cpu_percent": 0.9,
+          "mem_percent": 0.7,
+          "rss_kb": 56264,
+          "command": "python /app/main.py"
+        },
+        {
+          "pid": 2926,
+          "cpu_percent": 0.3,
+          "mem_percent": 0.7,
+          "rss_kb": 58784,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml"
+        },
+        {
+          "pid": 2935,
+          "cpu_percent": 2.6,
+          "mem_percent": 1.9,
+          "rss_kb": 157348,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 131945,
+          "cpu_percent": 2.3,
+          "mem_percent": 3.7,
+          "rss_kb": 304568,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        }
+      ],
+      "breaches": [],
+      "warmup_ignored": true,
+      "effective_breaches": []
+    },
+    {
+      "timestamp": 1774701273.9764025,
+      "grafana_health": {
+        "database": "ok",
+        "version": "12.4.1",
+        "commit": "46a02dc12a085445ab105b72fa159248f7d1dc9d",
+        "enterpriseCommit": "3b8a4056689b99185a3b7a3c13c50b3b4ef891c3"
+      },
+      "grafana_health_latency_seconds": 0.0025,
+      "exporter_metrics_latency_seconds": 0.0129,
+      "dynamic_rule_count": 350.0,
+      "config_rule_count": 353.0,
+      "last_scrape_success": 1.0,
+      "evaluation_duration_seconds": 0.872326,
+      "prometheus_queries": [
+        {
+          "name": "rule_score_count",
+          "expr": "count(grafana_anomaly_rule_score)",
+          "value": 353.0,
+          "latency_seconds": 0.0055
+        },
+        {
+          "name": "series_score_count",
+          "expr": "count(grafana_anomaly_score)",
+          "value": 474.0,
+          "latency_seconds": 0.0091
+        }
+      ],
+      "alert_queries": [
+        {
+          "name": "alert_ready_signal",
+          "expr": "max_over_time(grafana_anomaly_rule_score[5m])",
+          "value": 100.0,
+          "latency_seconds": 0.0066
+        }
+      ],
+      "dashboard_checks": [
+        {
+          "name": "demo_dashboard_page",
+          "url": "http://localhost:3000/d/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&from=now-6h&to=now",
+          "status": 200,
+          "latency_seconds": 0.0089,
+          "ok": true
+        }
+      ],
+      "render_checks": [
+        {
+          "name": "demo_panel_render",
+          "url": "http://localhost:3000/render/d-solo/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&panelId=1&from=now-6h&to=now&width=1200&height=700",
+          "status": 200,
+          "latency_seconds": 0.0077,
+          "ok": true
+        }
+      ],
+      "processes": [
+        {
+          "pid": 254,
+          "cpu_percent": 1.6,
+          "mem_percent": 2.9,
+          "rss_kb": 238564,
+          "command": "/usr/share/grafana/bin/grafana server --config=/etc/grafana/grafana.ini --pidfile=/run/grafana/grafana-server.pid --packaging=deb cfg:default.paths.logs=/var/log/grafana cfg:default.paths.data=/var/lib/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 278,
+          "cpu_percent": 0.4,
+          "mem_percent": 0.9,
+          "rss_kb": 78024,
+          "command": "/usr/bin/prometheus"
+        },
+        {
+          "pid": 1942,
+          "cpu_percent": 1.2,
+          "mem_percent": 2.5,
+          "rss_kb": 207780,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=2d"
+        },
+        {
+          "pid": 1944,
+          "cpu_percent": 0.9,
+          "mem_percent": 0.7,
+          "rss_kb": 57288,
+          "command": "python /app/main.py"
+        },
+        {
+          "pid": 2926,
+          "cpu_percent": 0.3,
+          "mem_percent": 0.7,
+          "rss_kb": 58784,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml"
+        },
+        {
+          "pid": 2935,
+          "cpu_percent": 2.6,
+          "mem_percent": 1.9,
+          "rss_kb": 157012,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 131945,
+          "cpu_percent": 2.3,
+          "mem_percent": 3.7,
+          "rss_kb": 304568,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        }
+      ],
+      "breaches": [],
+      "warmup_ignored": false,
+      "effective_breaches": []
+    },
+    {
+      "timestamp": 1774701289.4265556,
+      "grafana_health": {
+        "database": "ok",
+        "version": "12.4.1",
+        "commit": "46a02dc12a085445ab105b72fa159248f7d1dc9d",
+        "enterpriseCommit": "3b8a4056689b99185a3b7a3c13c50b3b4ef891c3"
+      },
+      "grafana_health_latency_seconds": 0.0028,
+      "exporter_metrics_latency_seconds": 0.0078,
+      "dynamic_rule_count": 350.0,
+      "config_rule_count": 353.0,
+      "last_scrape_success": 1.0,
+      "evaluation_duration_seconds": 0.848516,
+      "prometheus_queries": [
+        {
+          "name": "rule_score_count",
+          "expr": "count(grafana_anomaly_rule_score)",
+          "value": 353.0,
+          "latency_seconds": 0.005
+        },
+        {
+          "name": "series_score_count",
+          "expr": "count(grafana_anomaly_score)",
+          "value": 474.0,
+          "latency_seconds": 0.0089
+        }
+      ],
+      "alert_queries": [
+        {
+          "name": "alert_ready_signal",
+          "expr": "max_over_time(grafana_anomaly_rule_score[5m])",
+          "value": 100.0,
+          "latency_seconds": 0.0063
+        }
+      ],
+      "dashboard_checks": [
+        {
+          "name": "demo_dashboard_page",
+          "url": "http://localhost:3000/d/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&from=now-6h&to=now",
+          "status": 200,
+          "latency_seconds": 0.0092,
+          "ok": true
+        }
+      ],
+      "render_checks": [
+        {
+          "name": "demo_panel_render",
+          "url": "http://localhost:3000/render/d-solo/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&panelId=1&from=now-6h&to=now&width=1200&height=700",
+          "status": 200,
+          "latency_seconds": 0.0101,
+          "ok": true
+        }
+      ],
+      "processes": [
+        {
+          "pid": 254,
+          "cpu_percent": 1.6,
+          "mem_percent": 2.9,
+          "rss_kb": 238544,
+          "command": "/usr/share/grafana/bin/grafana server --config=/etc/grafana/grafana.ini --pidfile=/run/grafana/grafana-server.pid --packaging=deb cfg:default.paths.logs=/var/log/grafana cfg:default.paths.data=/var/lib/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 278,
+          "cpu_percent": 0.4,
+          "mem_percent": 0.9,
+          "rss_kb": 78024,
+          "command": "/usr/bin/prometheus"
+        },
+        {
+          "pid": 1942,
+          "cpu_percent": 1.2,
+          "mem_percent": 2.6,
+          "rss_kb": 211620,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=2d"
+        },
+        {
+          "pid": 1944,
+          "cpu_percent": 0.9,
+          "mem_percent": 0.7,
+          "rss_kb": 57800,
+          "command": "python /app/main.py"
+        },
+        {
+          "pid": 2926,
+          "cpu_percent": 0.3,
+          "mem_percent": 0.7,
+          "rss_kb": 58784,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml"
+        },
+        {
+          "pid": 2935,
+          "cpu_percent": 2.6,
+          "mem_percent": 1.9,
+          "rss_kb": 157012,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 131945,
+          "cpu_percent": 2.3,
+          "mem_percent": 3.7,
+          "rss_kb": 304568,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        }
+      ],
+      "breaches": [],
+      "warmup_ignored": false,
+      "effective_breaches": []
+    },
+    {
+      "timestamp": 1774701304.921861,
+      "grafana_health": {
+        "database": "ok",
+        "version": "12.4.1",
+        "commit": "46a02dc12a085445ab105b72fa159248f7d1dc9d",
+        "enterpriseCommit": "3b8a4056689b99185a3b7a3c13c50b3b4ef891c3"
+      },
+      "grafana_health_latency_seconds": 0.0039,
+      "exporter_metrics_latency_seconds": 0.0102,
+      "dynamic_rule_count": 350.0,
+      "config_rule_count": 353.0,
+      "last_scrape_success": 1.0,
+      "evaluation_duration_seconds": 0.934247,
+      "prometheus_queries": [
+        {
+          "name": "rule_score_count",
+          "expr": "count(grafana_anomaly_rule_score)",
+          "value": 353.0,
+          "latency_seconds": 0.0101
+        },
+        {
+          "name": "series_score_count",
+          "expr": "count(grafana_anomaly_score)",
+          "value": 474.0,
+          "latency_seconds": 0.0149
+        }
+      ],
+      "alert_queries": [
+        {
+          "name": "alert_ready_signal",
+          "expr": "max_over_time(grafana_anomaly_rule_score[5m])",
+          "value": 100.0,
+          "latency_seconds": 0.0151
+        }
+      ],
+      "dashboard_checks": [
+        {
+          "name": "demo_dashboard_page",
+          "url": "http://localhost:3000/d/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&from=now-6h&to=now",
+          "status": 200,
+          "latency_seconds": 0.0193,
+          "ok": true
+        }
+      ],
+      "render_checks": [
+        {
+          "name": "demo_panel_render",
+          "url": "http://localhost:3000/render/d-solo/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&panelId=1&from=now-6h&to=now&width=1200&height=700",
+          "status": 200,
+          "latency_seconds": 0.0078,
+          "ok": true
+        }
+      ],
+      "processes": [
+        {
+          "pid": 254,
+          "cpu_percent": 1.6,
+          "mem_percent": 2.9,
+          "rss_kb": 238544,
+          "command": "/usr/share/grafana/bin/grafana server --config=/etc/grafana/grafana.ini --pidfile=/run/grafana/grafana-server.pid --packaging=deb cfg:default.paths.logs=/var/log/grafana cfg:default.paths.data=/var/lib/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 278,
+          "cpu_percent": 0.4,
+          "mem_percent": 0.9,
+          "rss_kb": 78024,
+          "command": "/usr/bin/prometheus"
+        },
+        {
+          "pid": 1942,
+          "cpu_percent": 1.2,
+          "mem_percent": 2.7,
+          "rss_kb": 217892,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=2d"
+        },
+        {
+          "pid": 1944,
+          "cpu_percent": 0.9,
+          "mem_percent": 0.7,
+          "rss_kb": 57800,
+          "command": "python /app/main.py"
+        },
+        {
+          "pid": 2926,
+          "cpu_percent": 0.3,
+          "mem_percent": 0.7,
+          "rss_kb": 58784,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml"
+        },
+        {
+          "pid": 2935,
+          "cpu_percent": 2.6,
+          "mem_percent": 1.9,
+          "rss_kb": 157012,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 131945,
+          "cpu_percent": 2.3,
+          "mem_percent": 3.7,
+          "rss_kb": 303864,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        }
+      ],
+      "breaches": [],
+      "warmup_ignored": false,
+      "effective_breaches": []
+    },
+    {
+      "timestamp": 1774701320.3820083,
+      "grafana_health": {
+        "database": "ok",
+        "version": "12.4.1",
+        "commit": "46a02dc12a085445ab105b72fa159248f7d1dc9d",
+        "enterpriseCommit": "3b8a4056689b99185a3b7a3c13c50b3b4ef891c3"
+      },
+      "grafana_health_latency_seconds": 0.0037,
+      "exporter_metrics_latency_seconds": 0.0068,
+      "dynamic_rule_count": 350.0,
+      "config_rule_count": 353.0,
+      "last_scrape_success": 1.0,
+      "evaluation_duration_seconds": 0.836071,
+      "prometheus_queries": [
+        {
+          "name": "rule_score_count",
+          "expr": "count(grafana_anomaly_rule_score)",
+          "value": 353.0,
+          "latency_seconds": 0.0051
+        },
+        {
+          "name": "series_score_count",
+          "expr": "count(grafana_anomaly_score)",
+          "value": 474.0,
+          "latency_seconds": 0.0089
+        }
+      ],
+      "alert_queries": [
+        {
+          "name": "alert_ready_signal",
+          "expr": "max_over_time(grafana_anomaly_rule_score[5m])",
+          "value": 100.0,
+          "latency_seconds": 0.0069
+        }
+      ],
+      "dashboard_checks": [
+        {
+          "name": "demo_dashboard_page",
+          "url": "http://localhost:3000/d/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&from=now-6h&to=now",
+          "status": 200,
+          "latency_seconds": 0.0091,
+          "ok": true
+        }
+      ],
+      "render_checks": [
+        {
+          "name": "demo_panel_render",
+          "url": "http://localhost:3000/render/d-solo/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&panelId=1&from=now-6h&to=now&width=1200&height=700",
+          "status": 200,
+          "latency_seconds": 0.0185,
+          "ok": true
+        }
+      ],
+      "processes": [
+        {
+          "pid": 254,
+          "cpu_percent": 1.6,
+          "mem_percent": 2.9,
+          "rss_kb": 238544,
+          "command": "/usr/share/grafana/bin/grafana server --config=/etc/grafana/grafana.ini --pidfile=/run/grafana/grafana-server.pid --packaging=deb cfg:default.paths.logs=/var/log/grafana cfg:default.paths.data=/var/lib/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 278,
+          "cpu_percent": 0.4,
+          "mem_percent": 0.9,
+          "rss_kb": 78024,
+          "command": "/usr/bin/prometheus"
+        },
+        {
+          "pid": 1942,
+          "cpu_percent": 1.2,
+          "mem_percent": 2.7,
+          "rss_kb": 219428,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=2d"
+        },
+        {
+          "pid": 1944,
+          "cpu_percent": 0.9,
+          "mem_percent": 0.7,
+          "rss_kb": 57800,
+          "command": "python /app/main.py"
+        },
+        {
+          "pid": 2926,
+          "cpu_percent": 0.3,
+          "mem_percent": 0.7,
+          "rss_kb": 58784,
+          "command": "/bin/prometheus --config.file=/etc/prometheus/prometheus.yml"
+        },
+        {
+          "pid": 2935,
+          "cpu_percent": 2.6,
+          "mem_percent": 1.9,
+          "rss_kb": 157012,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        },
+        {
+          "pid": 131945,
+          "cpu_percent": 2.3,
+          "mem_percent": 3.7,
+          "rss_kb": 303864,
+          "command": "grafana server --homepath=/usr/share/grafana --config=/etc/grafana/grafana.ini --packaging=docker cfg:default.log.mode=console cfg:default.paths.data=/var/lib/grafana cfg:default.paths.logs=/var/log/grafana cfg:default.paths.plugins=/var/lib/grafana/plugins cfg:default.paths.provisioning=/etc/grafana/provisioning"
+        }
+      ],
+      "breaches": [],
+      "warmup_ignored": false,
+      "effective_breaches": []
+    }
+  ],
+  "seed_summary": {
+    "added_rules": 347,
+    "total_post_seconds": 23.8168
+  },
+  "sample_count": 5,
+  "warmup_samples_to_ignore": 1,
+  "final_verdict": "pass"
+}

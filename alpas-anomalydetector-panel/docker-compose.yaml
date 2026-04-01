@@ -3,3 +3,13 @@ services:
     extends:
       file: .config/docker-compose-base.yaml
       service: grafana
+    depends_on:
+      - renderer
+
+  renderer:
+    image: grafana/grafana-image-renderer:latest
+    container_name: 'alpas-anomaly-renderer'
+    ports:
+      - ${GRAFANA_RENDERER_PORT:-8081}:8081/tcp
+    environment:
+      AUTH_TOKEN: ${GRAFANA_RENDERER_TOKEN:-anomaly-demo-token}

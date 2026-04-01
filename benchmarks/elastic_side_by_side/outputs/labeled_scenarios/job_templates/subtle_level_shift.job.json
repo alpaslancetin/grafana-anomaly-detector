@@ -1,0 +1,30 @@
+{
+  "job_id": "benchmark-subtle_level_shift",
+  "description": "Elastic side-by-side benchmark for subtle_level_shift",
+  "model_plot_config": {
+    "enabled": true
+  },
+  "analysis_config": {
+    "bucket_span": "5m",
+    "detectors": [
+      {
+        "function": "high_mean",
+        "field_name": "metric_value",
+        "detector_description": "subtle_level_shift detector"
+      }
+    ],
+    "influencers": [
+      "service",
+      "scenario"
+    ]
+  },
+  "data_description": {
+    "time_field": "timestamp_epoch_seconds",
+    "time_format": "epoch"
+  },
+  "custom_settings": {
+    "benchmark_scenario": "subtle_level_shift",
+    "benchmark_expected_points": 120,
+    "benchmark_labeled_anomaly_count": 12
+  }
+}

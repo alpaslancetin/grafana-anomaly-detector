@@ -1,0 +1,754 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "BiP Devops benchmark datasource",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "12.4.1"
+    },
+    {
+      "type": "panel",
+      "id": "alpas-anomalydetector-panel",
+      "name": "Anomaly Detector",
+      "version": "1.2.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Import Notes",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# BiP Devops / Anomaly Detector Benchmark\n\n- Bu dashboard `BiP Devops` klasoru altina import edilmek uzere hazirlandi.\n- Datasource secimi import sirasinda Prometheus olarak yapilmalidir.\n- Panel queryleri, verdigin ham PromQL ifadelerini dogrudan kullanir.\n- Score feed `Auto sync` olarak acik gelir; exporter endpoint varsayilani `http://192.168.51.45:9110`\n- Import sonrasi dashboard kaydedilip anomaly panel kartlarindan score feed rule sync dogrulanmalidir."
+      },
+      "transparent": false
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(xmpp_messages_total{name=\"O_P2P\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 2,
+      "options": {
+        "title": "xmpp_p2p | elastic-ml-xmpp-p2p",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "warning_first",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_p2p_elastic_ml_xmpp_p2p"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(xmpp_messages_total{name=\"O_P2P\"}[5m]))",
+          "legendFormat": "xmpp_p2p",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_p2p | elastic-ml-xmpp-p2p",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(xmpp_online{name=\"online\"})",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 3,
+      "options": {
+        "title": "xmpp_online | elastic-ml-xmpp_online",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_online_elastic_ml_xmpp_online"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(xmpp_online{name=\"online\"})",
+          "legendFormat": "xmpp_online",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_online | elastic-ml-xmpp_online",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(xmpp_online{name=\"available\"})",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 4,
+      "options": {
+        "title": "xmpp_available | elastic-ml-xmpp_available",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_available_elastic_ml_xmpp_available"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(xmpp_online{name=\"available\"})",
+          "legendFormat": "xmpp_available",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_available | elastic-ml-xmpp_available",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(xmpp_threads{name=\"client\", param=\"active\"})",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
+      "id": 5,
+      "options": {
+        "title": "xmpp_threads | elastic-ml-xmpp_threads",
+        "setupMode": "recommended",
+        "metricPreset": "resource",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_threads_elastic_ml_xmpp_threads"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(xmpp_threads{name=\"client\", param=\"active\"})",
+          "legendFormat": "xmpp_threads",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_threads | elastic-ml-xmpp_threads",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(xmpp_threads{name=\"MessageRouter\", param=\"active\"})",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      },
+      "id": 6,
+      "options": {
+        "title": "xmpp_MessageRouter | elastic-ml-xmpp_MessageRouter",
+        "setupMode": "recommended",
+        "metricPreset": "resource",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_messagerouter_elastic_ml_xmpp_messagerouter"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(xmpp_threads{name=\"MessageRouter\", param=\"active\"})",
+          "legendFormat": "xmpp_MessageRouter",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_MessageRouter | elastic-ml-xmpp_MessageRouter",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(xmpp_stats_total{name=\"ROUTEPACKET_COUNT\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
+      "id": 7,
+      "options": {
+        "title": "xmpp_routepacket_count | elastic-ml-xmpp_routepacket_count",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "warning_first",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_routepacket_count_elastic_ml_xmpp_routepacket_count"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(xmpp_stats_total{name=\"ROUTEPACKET_COUNT\"}[5m]))",
+          "legendFormat": "xmpp_routepacket_count",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_routepacket_count | elastic-ml-xmpp_routepacket_count",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(xmpp_stats_total{name=\"ROOM_CREATED_COUNT\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 89
+      },
+      "id": 8,
+      "options": {
+        "title": "xmpp_group_create | elastic-ml-xmpp_group_create",
+        "setupMode": "recommended",
+        "metricPreset": "business",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_xmpp_group_create_elastic_ml_xmpp_group_create"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(xmpp_stats_total{name=\"ROOM_CREATED_COUNT\"}[5m]))",
+          "legendFormat": "xmpp_group_create",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "xmpp_group_create | elastic-ml-xmpp_group_create",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(location_imos_request_received_count{country=\"90\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 103
+      },
+      "id": 9,
+      "options": {
+        "title": "imos_total_register | elastic-ml-imos_total_register",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "balanced",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_imos_total_register_elastic_ml_imos_total_register"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(location_imos_request_received_count{country=\"90\"}[5m]))",
+          "legendFormat": "imos_total_register",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "imos_total_register | elastic-ml-imos_total_register",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(counter_action{job=\"imos\",endpoint=~\"REST\", action=\"create\", result!~\"200|201\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 117
+      },
+      "id": 10,
+      "options": {
+        "title": "imos_unsuccessfull_register | elastic-ml-imos_unsuccessfull_register",
+        "setupMode": "recommended",
+        "metricPreset": "error_rate",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "page_first",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_imos_unsuccessfull_register_elastic_ml_imos_unsuccessfull_register"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(counter_action{job=\"imos\",endpoint=~\"REST\", action=\"create\", result!~\"200|201\"}[5m]))",
+          "legendFormat": "imos_unsuccessfull_register",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "imos_unsuccessfull_register | elastic-ml-imos_unsuccessfull_register",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(counter_pn_action{os=\"android\", action=\"request\", status=\"received\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 131
+      },
+      "id": 11,
+      "options": {
+        "title": "pnsender_android_total_pn | elastic-ml-pnsender_android_total_pn",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "warning_first",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_pnsender_android_total_pn_elastic_ml_pnsender_android_total_pn"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(counter_pn_action{os=\"android\", action=\"request\", status=\"received\"}[5m]))",
+          "legendFormat": "pnsender_android_total_pn",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "pnsender_android_total_pn | elastic-ml-pnsender_android_total_pn",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "sum(increase(counter_pn_action{os=\"ios\", action=\"request\", status=\"received\"}[5m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 145
+      },
+      "id": 12,
+      "options": {
+        "title": "pnsender_ios_total_pn | elastic-ml-pnsender_ios_total_pn",
+        "setupMode": "recommended",
+        "metricPreset": "traffic",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "warning_first",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_pnsender_ios_total_pn_elastic_ml_pnsender_ios_total_pn"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(counter_pn_action{os=\"ios\", action=\"request\", status=\"received\"}[5m]))",
+          "legendFormat": "pnsender_ios_total_pn",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "pnsender_ios_total_pn | elastic-ml-pnsender_ios_total_pn",
+      "type": "alpas-anomalydetector-panel"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "(sum(increase(stos_send_otp_counter{region=\"90\", action=\"verified\"}[10m]))*100) / sum(increase(stos_send_otp_counter{region=\"90\", action=\"processed\"}[10m]))",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 159
+      },
+      "id": 13,
+      "options": {
+        "title": "otp_tr_suc_rate | elastic-ml-otp_tr_suc_rate",
+        "setupMode": "recommended",
+        "metricPreset": "business",
+        "detectionMode": "single",
+        "algorithm": "mad",
+        "sensitivity": 2.8,
+        "baselineWindow": 12,
+        "seasonalitySamples": 24,
+        "seasonalRefinement": "cycle",
+        "severityPreset": "page_first",
+        "bucketSpan": "auto",
+        "maxAnomalies": 6,
+        "showBands": true,
+        "showExpectedLine": true,
+        "showSummary": true,
+        "showExports": false,
+        "showInlineSeriesLabels": true,
+        "showFocusBand": true,
+        "timeAxisDensity": "auto",
+        "timeAxisPlacement": "top_and_bottom",
+        "markerShapeMode": "severity",
+        "scoreFeedMode": "auto",
+        "scoreFeedEndpoint": "http://192.168.51.45:9110",
+        "scoreFeedRuleNamePrefix": "bip_devops_otp_tr_suc_rate_elastic_ml_otp_tr_suc_rate"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(increase(stos_send_otp_counter{region=\"90\", action=\"verified\"}[10m]))*100) / sum(increase(stos_send_otp_counter{region=\"90\", action=\"processed\"}[10m]))",
+          "legendFormat": "otp_tr_suc_rate",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "otp_tr_suc_rate | elastic-ml-otp_tr_suc_rate",
+      "type": "alpas-anomalydetector-panel"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "bip",
+    "devops",
+    "anomaly",
+    "benchmark",
+    "elastic-ml"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Anomaly Detector Benchmark",
+  "uid": "bip-devops-anomaly-benchmark",
+  "version": 1,
+  "weekStart": ""
+}

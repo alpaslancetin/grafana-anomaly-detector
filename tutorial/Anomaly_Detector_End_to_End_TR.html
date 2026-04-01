@@ -150,12 +150,30 @@
     }
     .small { font-size: 13px; color: var(--muted); }
     .page-break { page-break-before: always; }
+    @page {
+      size: A4;
+      margin: 12mm 10mm 12mm 10mm;
+    }
     @media print {
       body { background: white; }
       .page { max-width: none; padding: 0; }
       .section, .hero { box-shadow: none; }
       a { color: inherit; text-decoration: none; }
       .page-break { break-before: page; }
+      h2, h3 { break-after: avoid-page; page-break-after: avoid; }
+      p, li { orphans: 3; widows: 3; }
+      .hero-grid, .grid-2, .flow { gap: 10px; }
+      .figure, .caption, table, thead, tbody, tr, td, th, pre, .note, .tip, .warning {
+        break-inside: avoid-page;
+        page-break-inside: avoid;
+      }
+      .figure img, .figure video {
+        max-height: 225mm;
+        object-fit: contain;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
     }
     @media (max-width: 900px) {
       .hero-grid, .grid-2, .flow {
@@ -167,15 +185,15 @@
 <body>
   <div class="page">
     <section class="hero">
-      <span class="pill" style="background: rgba(255,255,255,.14); color: white;">Grafana 12.4.1 + Son Panel Akışı</span>
+      <span class="pill" style="background: rgba(255,255,255,.14); color: white;">Grafana 12.4.1 + Plugin 1.2.0</span>
       <h1>Grafana Anomaly Detector<br />Uçtan Uca Kullanım Kılavuzu</h1>
       <p>Bu doküman, plugin'in <strong>son hâline</strong> göre baştan hazırlanmıştır. Amaç yalnızca panelin nasıl açıldığını göstermek değil; dashboard üstünde gördüğün her kartın, her değerin, her butonun ve <strong>Prometheus anomaly score feed</strong> akışının ne anlama geldiğini görsellerle birlikte netleştirmektir.</p>
       <p>İçerik, güncel panel kodu, release paketleri, canlı Prometheus demo ekranları, TestData örnekleri ve tutorial video dosyası üzerinden hazırlanmıştır.</p>
       <div class="hero-grid">
         <div class="hero-stat"><span>Grafana</span><strong>12.4.1</strong></div>
+        <div class="hero-stat"><span>Plugin</span><strong>1.2.0</strong></div>
         <div class="hero-stat"><span>Plugin ID</span><strong>alpas-anomalydetector-panel</strong></div>
-        <div class="hero-stat"><span>Öne Çıkan Akış</span><strong>Score feed + Alert export</strong></div>
-        <div class="hero-stat"><span>Tutorial Tarihi</span><strong>19 Mart 2026</strong></div>
+        <div class="hero-stat"><span>Tutorial Tarihi</span><strong>31 Mart 2026</strong></div>
       </div>
     </section>
 
@@ -192,7 +210,7 @@
         <li><a href="#scorefeed">Prometheus Anomaly Score Feed</a></li>
         <li><a href="#install">Kurulum ve Taşıma</a></li>
         <li><a href="#alerting">Grafana Alerting Kullanımı</a></li>
-        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#troubleshooting">Sorun Giderme</a></li>
       </ol>
     </section>
 
@@ -210,11 +228,11 @@
           <h3>Son hâlde neler var?</h3>
           <ul>
             <li>Single metric ve multi metric analiz</li>
-            <li>Rolling z-score, MAD, EWMA ve Seasonal baseline</li>
-            <li>Recommendation banner ve preset tabanlı kullanım</li>
-            <li>Selected anomaly detay alanı</li>
-            <li>Annotation JSON ve Grafana annotation üretimi</li>
-            <li>Prometheus score feed, alert query export ve per-series query üretimi</li>
+            <li>Rolling z-score, MAD, EWMA, Seasonal baseline ve Level shift detector</li>
+            <li>Recommendation banner, preset tabanlı kullanım ve <code>Subtle level shift / drift</code> preset'i</li>
+            <li><code>Selected anomaly</code> kartinda <code>Detection strength</code>, <code>Confidence</code>, <code>Data quality</code> ve <code>Main reason</code></li>
+            <li>Daha profesyonel chart dili: severity marker sekilleri, inline series label, focus band, crosshair ve pinned tooltip</li>
+            <li>Prometheus score feed, confidence score metric'i, alert query export ve per-series query üretimi</li>
           </ul>
         </div>
         <div>
@@ -275,8 +293,11 @@
           <tr><td>Ana çizgi</td><td>Gerçek metric serisi</td></tr>
           <tr><td>Expected line</td><td>Algoritmanın beklediği merkez davranış</td></tr>
           <tr><td>Expected band</td><td>Normal kabul edilen aralık</td></tr>
-          <tr><td>Anomaly marker</td><td>Threshold'u aşan single metric noktası</td></tr>
-          <tr><td>Event band</td><td>Multi metric modda birleşik anomaly penceresi</td></tr>
+          <tr><td>Anomaly marker</td><td>Threshold'u aşan single metric noktası. Severity bazli sekil ve daha belirgin halo ile gosterilir</td></tr>
+          <tr><td>Event band</td><td>Multi metric modda birleşik anomaly penceresi. Ribbon ve merkez marker ile izlemeyi kolaylastirir</td></tr>
+          <tr><td>Inline series label</td><td>Seri sonuna yerlesen isim + son deger etiketi; legend okumadan hangi cizginin ne oldugunu anlamayi kolaylastirir</td></tr>
+          <tr><td>Focus band</td><td>Secili anomaly etrafindaki pencereyi altta buyuterak gosterir</td></tr>
+          <tr><td>Crosshair ve pinned tooltip</td><td>Hover ile zaman takibi yapar, click ile ayni anin detayini sabitlemeni saglar</td></tr>
           <tr><td>Legend</td><td>Her seri için anomaly count ve max score özeti</td></tr>
         </tbody>
       </table>
@@ -299,6 +320,7 @@
           <tr><td>Error rate</td><td>MAD</td><td>2.6</td><td>18</td><td>Page first</td></tr>
           <tr><td>Resource usage</td><td>EWMA</td><td>2.3</td><td>18</td><td>Balanced</td></tr>
           <tr><td>Business KPI</td><td>Seasonal</td><td>2.4</td><td>10</td><td>Balanced</td></tr>
+          <tr><td>Subtle level shift / drift</td><td>Level shift detector</td><td>2.5</td><td>16</td><td>Balanced</td></tr>
         </tbody>
       </table>
       <div class="note"><strong>Banner neden önemli?</strong> Recommendation banner, yalnızca sonucu değil; o sonucun neden seçildiğini de açıklar. Böylece kullanıcı tuning mantığını da görür.</div>
@@ -328,8 +350,20 @@
     <section class="section" id="cards">
   <h2>6. Kartlar ve Butonlar</h2>
   <div class="figure">
+    <img src="assets/screenshots/06-selected-anomaly-and-export.png" alt="Secili anomaly ve inspector tam gorunumu" />
+    <div class="caption">Sekil 6. Multi metric panelde secili incident, anomaly inspector ve aktif detection profile birlikte okunur. Son surumle birlikte marker, inline label ve hover detaylari daha belirgin hale getirildi.</div>
+  </div>
+  <div class="figure">
     <img src="assets/screenshots/09-selected-anomaly-context.png" alt="Top anomalies, Selected anomaly ve Annotation export kartlari" />
-    <div class="caption">Sekil 6. Top anomalies, Selected anomaly, How it works ve Annotation export kartlari ayni anda. Secili event degistikce ortadaki detay alani ve sagdaki export icerigi birlikte guncellenir.</div>
+    <div class="caption">Sekil 7. Top anomalies, Selected anomaly, How it works ve score feed karti ayni akista. Secili event degistikce ortadaki detay alani ve alttaki senkronizasyon durumu birlikte guncellenir.</div>
+  </div>
+  <div class="figure">
+    <img src="assets/screenshots/07-selected-anomaly-detail.png" alt="Single metric anomaly detail gorunumu" />
+    <div class="caption">Sekil 8. Single metric panelde secili anomaly detayi. Detection strength, severity, confidence, data quality ve main reason alanlari buradan okunur.</div>
+  </div>
+  <div class="figure">
+    <img src="assets/screenshots/08-annotation-export.png" alt="Annotation export ve alert export gorunumu" />
+    <div class="caption">Sekil 9. Operational exports acildiginda annotation export ve alert rule export bloklari ayni ekranda okunur. Bu alanlar insan operator, handoff ve alert tanim akisi icin birlikte tasarlanmistir.</div>
   </div>
   <p>Bu gorunum, panelin son halindeki ozet akislarini tek karede gosterir. Sol tarafta oncelikli olay listesi vardir, ortada secili olay triage detayi acilir, sag tarafta ise ayni baglam annotation veya handoff JSON'una donusur.</p>
 
@@ -353,6 +387,10 @@
     </thead>
     <tbody>
       <tr><td>Score</td><td>Secili anomaly'nin anlik skoru</td></tr>
+      <tr><td>Detection strength</td><td>Point score ve window score tarafindan desteklenen toplam anomaly gucu</td></tr>
+      <tr><td>Confidence</td><td>Algoritmanin bu anomaly kararindan ne kadar emin oldugunu soyler</td></tr>
+      <tr><td>Data quality</td><td>Verinin eksik, gurultulu veya saglikli olma durumunu ozetler</td></tr>
+      <tr><td>Main reason</td><td>Skoru en cok neyin tasidigini soyler; ornegin sharp point deviation veya sustained level shift</td></tr>
       <tr><td>Severity</td><td>Low / Medium / High / Critical etiketi ve severity score</td></tr>
       <tr><td>Bucket span</td><td>Olayin ait oldugu zaman penceresi</td></tr>
       <tr><td>Guidance</td><td>Severity preset'e gore yazilmis operasyon onerisi</td></tr>
@@ -364,7 +402,7 @@
       <tr><td>Samples in bucket</td><td>O bucket'a dusen ham ornek sayisi</td></tr>
     </tbody>
   </table>
-  <p>Multi metric event secildiginde alttaki detay alanina seri bazli kirilim gelir ve her seri icin <strong>Actual / Expected / Deviation / Score</strong> kolonlari ayrica gosterilir.</p>
+  <p>Multi metric event secildiginde alttaki detay alanina seri bazli kirilim gelir ve her seri icin <strong>Actual / Expected / Deviation / Score / Main reason / Confidence</strong> alanlari ayrica gosterilir.</p>
   <div class="note"><strong>Onemli fark:</strong> Selected anomaly kartindaki <code>Copy annotation JSON</code> ve <code>Create annotation</code> secili tek olaya calisir. Operational exports altindaki <code>Annotation export</code> ise ozet listesini JSON array olarak verir.</div>
 
   <h3>6.3 Butonlar</h3>
@@ -400,7 +438,7 @@
       <tr><td>Exporter endpoint</td><td>URL</td><td>Browser'in erisecegi exporter adresi. Varsayilan tipik deger <code>http://127.0.0.1:9110</code></td></tr>
       <tr><td>Rule name prefix</td><td>Metin</td><td>Uretilen Prometheus rule isimlerinin basina kisa bir onek ekler</td></tr>
       <tr><td>Bucket span</td><td>Auto / Raw / 1m / 5m / 15m / 1h</td><td>Anomaly scoring oncesi istege bagli pre-aggregation uygular</td></tr>
-      <tr><td>Algorithm</td><td>Rolling z-score / Rolling MAD / EWMA baseline / Seasonal baseline</td><td>Advanced modda kullanilacak scoring stratejisini secer</td></tr>
+      <tr><td>Algorithm</td><td>Rolling z-score / Rolling MAD / EWMA baseline / Seasonal baseline / Level shift detector</td><td>Advanced modda kullanilacak scoring stratejisini secer</td></tr>
       <tr><td>Anomaly threshold</td><td>Numerik deger</td><td>Yuksekse daha az anomaly cikar, dusukse daha hassas olur</td></tr>
       <tr><td>History window</td><td>Numerik deger</td><td>Z-score ve MAD icin lookback, EWMA icin smoothing, seasonal icin peer derinligini belirler</td></tr>
       <tr><td>Season length (samples)</td><td>Numerik deger</td><td>Cycle-based seasonal modda donem uzunlugunu sample cinsinden verir</td></tr>
@@ -411,6 +449,11 @@
       <tr><td>Show expected line</td><td>On / Off</td><td>Beklenen merkez cizgisini gosterir veya gizler</td></tr>
       <tr><td>Show anomaly summary</td><td>On / Off</td><td>Top anomalies, Selected anomaly ve How it works kartlarini acip kapatir</td></tr>
       <tr><td>Show export blocks</td><td>On / Off</td><td>Operational exports alaninin render edilip edilmeyecegini belirler</td></tr>
+      <tr><td>Show inline series labels</td><td>On / Off</td><td>Her cizginin sonuna seri adi ve son degeri yazdirir</td></tr>
+      <tr><td>Show focus band</td><td>On / Off</td><td>Secili anomaly etrafindaki pencereyi altta buyuten odak bandini acar</td></tr>
+      <tr><td>Time axis density</td><td>Auto / Compact / Balanced / Dense</td><td>Zaman etiketlerinin ne kadar sik gosterilecegini belirler</td></tr>
+      <tr><td>Time axis placement</td><td>Bottom only / Top + bottom</td><td>Zaman etiketlerinin altta mi yoksa hem ustte hem altta mi gosterilecegini belirler</td></tr>
+      <tr><td>Marker shape mode</td><td>Severity shapes / Classic circles</td><td>Anomaly marker sekillerinin severity'e gore mi yoksa klasik daire olarak mi gosterilecegini belirler</td></tr>
     </tbody>
   </table>
 
@@ -465,8 +508,13 @@
       <tr><td>Auto sync</td><td>Kaydedilmis dashboard tanimini baz alir ve kisa araliklarla Prometheus score rule'larini guncel tutar</td></tr>
     </tbody>
   </table>
+  <div class="warning"><strong>Onemli davranis:</strong> <code>Off</code> moduna gecmek veya dashboard'u kapatmak, exporter tarafinda daha once sync edilmis rule kayitlarini otomatik silmez. Bu hareket sadece panelin yeni sync davranisini durdurur.</div>
 
   <h3>8.3 Show score rules acilinca ne gorursun?</h3>
+  <div class="figure">
+    <img src="assets/screenshots/10-selected-anomaly-context-alt.png" alt="Show synced rules ve export bloklari" />
+    <div class="caption">Sekil 10. Show synced rules acildiginda rule-level alert query, per-series drilldown query ve alttaki export bloklari ayni akista incelenebilir.</div>
+  </div>
   <table>
     <thead>
       <tr><th>Alan</th><th>Aciklama</th></tr>
@@ -481,7 +529,23 @@
   </table>
   <p>Bu kisim, alert'i tek rule seviyesinde tutup drilldown'i ancak gerekince acmak isteyen operasyon akisi icin cok kullanislidir.</p>
 
-  <h3>8.4 Uretilen metric'ler</h3>
+  <h3>8.4 Feed hangi zaman penceresiyle hesaplanir?</h3>
+  <p>Panel ekraninda <code>6h</code> veya <code>24h</code> secmen, exporter'a giden score feed hesabinin penceresini dogrudan belirlemez. Feed mantigi <strong>rolling live evaluation</strong> seklindedir.</p>
+  <table>
+    <thead>
+      <tr><th>Katman</th><th>Neyi belirler?</th><th>Pratikte ne anlama gelir?</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Evaluation end time</td><td>Exporter'in o an skoru hesapladigi an</td><td>Skor her dongude <code>now</code> anina gore uretilir</td></tr>
+      <tr><td>PromQL lookback</td><td>Query'nin kendi zaman penceresi</td><td>Ornegin <code>increase(...[5m])</code> kullaniliyorsa ham sample son 5 dakikayi temsil eder</td></tr>
+      <tr><td>Detector history</td><td>Exporter'in rolling state icinde tuttugu gecmis sample'lar</td><td>Baseline, smoothing, level shift veya seasonal karsilastirma bu gecmisten uretilir</td></tr>
+      <tr><td>Dashboard time range</td><td>Panelin goruntulediği tarihsel pencere</td><td>Panel analizi icindir; exporter score hesabina ayni sekilde gitmez</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Ornek:</strong> Dunün <code>12:00</code>'de bir feed baslattigini ve su an saatin <code>14:30</code> oldugunu dusun. Query <code>sum(increase(counter_pn_action{...}[5m]))</code> ise exporter'in <code>14:30</code>'da Prometheus'tan cektigi ham deger, dogrudan <code>14:25 - 14:30</code> araligini temsil eder. Ama anomaly score sadece bu 5 dakikadan degil, exporter'in daha once topladigi rolling sample gecmisinden de etkilenir.</p>
+  <div class="note"><strong>Kisa kural:</strong> Feed skoru = <code>su anki query sonucu</code> + <code>exporter rolling history</code> + <code>sync sirasinda kaydedilen detector ayarlari</code>. Bu nedenle paneldeki <code>24h peak score</code> ile Prometheus'taki canli <code>rule_score</code> birebir ayni olmak zorunda degildir.</div>
+
+  <h3>8.5 Uretilen metric'ler</h3>
   <table>
     <thead>
       <tr><th>Metric</th><th>Ne ise yarar?</th></tr>
@@ -491,10 +555,26 @@
       <tr><td><code>grafana_anomaly_score</code></td><td>Seri seviyesinde normalize anomaly score</td></tr>
       <tr><td><code>grafana_anomaly_score_raw</code></td><td>Algoritmanin ham skoru; daha ileri tuning ve inceleme icin yararlidir</td></tr>
       <tr><td><code>grafana_anomaly_is_anomaly</code></td><td>Threshold asilmis ise <code>1</code> doner</td></tr>
+      <tr><td><code>grafana_anomaly_confidence_score</code></td><td>Rule veya seri bazli anomaly kararinin ne kadar guvenli oldugunu 0-100 arasi ek bir sinyal olarak verir</td></tr>
     </tbody>
   </table>
 
-  <h3>8.5 Operational exports ile iliskisi</h3>
+  <h3>8.6 Feed ne zaman devam eder, ne zaman durur?</h3>
+  <table>
+    <thead>
+      <tr><th>Durum</th><th>Feed davranisi</th><th>Not</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Ayni panel yeniden sync edildi</td><td>Mevcut rule set guncellenir, ayni panel kendi kendine duplicate biriktirmez</td><td>Ayni <code>dashboardUid + panelId</code> kaydi overwrite edilir</td></tr>
+      <tr><td>Dashboard kapatildi</td><td>Feed devam eder</td><td>Exporter state'te kayitli rule calismayi surdurur</td></tr>
+      <tr><td>Dashboard silindi</td><td>Feed otomatik kesilmez</td><td>Exporter tarafindaki state manuel temizlenmelidir</td></tr>
+      <tr><td>Farkli bir kullanici ayni query ile yeni dashboard kopyasi olusturdu</td><td>Ayrica yeni rule olusabilir</td><td>Ayni metric farkli prefix veya farkli panel kimligi ile tekrar beslenebilir</td></tr>
+      <tr><td>Score feed mode = Off</td><td>Yeni sync durur, mevcut rule'lar kalabilir</td><td>Temizlik icin exporter state veya future delete endpoint gerekir</td></tr>
+    </tbody>
+  </table>
+  <p>Portable modda state tipik olarak <code>alert-bundle/.portable-runtime/dynamic_rules.json</code> altinda tutulur. Native RHEL kurulumunda ise state dizini tipik olarak <code>/var/lib/grafana-anomaly-exporter</code> altindadir. Bir feed'i gercekten durdurmak icin ilgili rule kaydi bu state tarafindan temizlenmeli ve exporter yeniden baslatilmalidir.</p>
+
+  <h3>8.7 Operational exports ile iliskisi</h3>
   <table>
     <thead>
       <tr><th>Cikti</th><th>Kapsam</th><th>Kullanim</th></tr>
@@ -507,7 +587,7 @@
     </tbody>
   </table>
 
-  <h3>8.6 Tipik query ornekleri</h3>
+  <h3>8.8 Tipik query ornekleri</h3>
   <pre>grafana_anomaly_rule_score{rule="checkout_latency_panel"}</pre>
   <pre>max_over_time(grafana_anomaly_rule_score{rule="checkout_latency_panel"}[5m])</pre>
   <pre>max(max_over_time(grafana_anomaly_rule_score{rule=~"checkout_latency_panel|checkout_error_rate_panel"}[5m]))</pre>
@@ -515,7 +595,7 @@
   <pre>grafana_anomaly_score_raw{rule="checkout_latency_panel"}</pre>
   <pre>grafana_anomaly_is_anomaly{rule="checkout_latency_panel"}</pre>
 
-  <h3>8.7 Exporter config ozeti</h3>
+  <h3>8.9 Exporter config ozeti</h3>
   <pre>global:
   prometheus_url: http://host.docker.internal:9090
   evaluation_interval_seconds: 10
@@ -531,7 +611,19 @@ rules: []</pre>
 
     <section class="section" id="install">
       <h2>9. Kurulum ve Taşıma</h2>
-      <h3>9.1 Sadece plugin taşıyacaksan</h3>
+      <h3>9.1 Mevcut prod kurulumunu 1.2.0'a upgrade edeceksen</h3>
+      <ol>
+        <li>Mevcut plugin klasorunu yedekle</li>
+        <li>Teslim paketinden <code>alpas-anomalydetector-panel-plugin-only.zip</code> veya acilmis <code>plugin-only/alpas-anomalydetector-panel</code> klasorunu kullan</li>
+        <li>Yeni <code>alpas-anomalydetector-panel</code> klasorunu plugin dizinine kopyala</li>
+        <li><code>allow_loading_unsigned_plugins = alpas-anomalydetector-panel</code> ayarinin korundugunu teyit et</li>
+        <li>Grafana servisini restart et</li>
+        <li>Tarayicida hard refresh yap</li>
+        <li>Panel edit ekraninda <code>Subtle level shift / drift</code> preset'i ile yeni inspector alanlarini dogrula</li>
+      </ol>
+      <div class="note"><strong>Not:</strong> Score feed kullaniyorsan exporter'i de yeni bundle ile guncellemen gerekir. Bu surumle birlikte <code>grafana_anomaly_confidence_score</code> metriği de gelir.</div>
+
+      <h3>9.2 Sadece plugin taşıyacaksan</h3>
       <pre>alpas-anomalydetector-panel-plugin-only.zip</pre>
       <p>RHEL / Linux hızlı kurulum:</p>
       <pre>cd plugin-only
@@ -543,10 +635,11 @@ sudo ./install-rhel-plugin.sh</pre>
         <li><code>grafana-server</code> servisini yeniden başlatır</li>
       </ul>
 
-      <h3>9.2 Plugin + exporter kuracaksan</h3>
+      <h3>9.3 Plugin + exporter kuracaksan</h3>
       <pre>cd alert-bundle
 sudo ./install-exporter-rhel.sh http://127.0.0.1:9090
 sudo ./enable-local-prometheus-scrape-rhel.sh</pre>
+      <div class="tip"><strong>Python uyumlulugu:</strong> Portable bundle stdlib-only duzende hazirlanmistir ve minimum onerilen surum <code>Python 3.7+</code>'dir. Teslimde ayrica <code>alpas-anomaly-alert-bundle-python39-compatible.zip</code> kopyasi da bulunur; <code>3.9.20</code> ile test edilmistir.</div>
       <p>Remote Prometheus senaryosunda:</p>
       <pre>sudo EXPORTER_LISTEN_HOST=0.0.0.0 ./install-exporter-rhel.sh http://prometheus.example.internal:9090</pre>
       <p>Ardından remote Prometheus tarafına scrape job eklenir:</p>
@@ -625,7 +718,7 @@ sudo ./enable-local-prometheus-scrape-rhel.sh</pre>
 </section>
 
     <section class="section" id="troubleshooting">
-      <h2>11. Troubleshooting</h2>
+      <h2>11. Sorun Giderme</h2>
       <table>
         <thead>
           <tr><th>Belirti</th><th>Muhtemel neden</th><th>Ne yapılmalı?</th></tr>
@@ -635,8 +728,12 @@ sudo ./enable-local-prometheus-scrape-rhel.sh</pre>
           <tr><td>Hiç anomaly görünmüyor</td><td>Threshold yüksek veya bucket span fazla büyük</td><td>Threshold'u düşür, raw/auto dene</td></tr>
           <tr><td>Çok fazla anomaly var</td><td>Metric gürültülü ya da threshold çok düşük</td><td>MAD/EWMA dene, threshold'u artır</td></tr>
           <tr><td>Create annotation pasif</td><td>Dashboard kayıtlı değil</td><td>Dashboard'u kaydet</td></tr>
-          <tr><td>Score feed sync olmuyor</td><td>Exporter yok, endpoint yanlış veya panel henüz kaydedilmedi</td><td>Endpoint'i doğrula, dashboard'u kaydet, tekrar sync et</td></tr>
+      <tr><td>Score feed sync olmuyor</td><td>Exporter yok, endpoint yanlış veya panel henüz kaydedilmedi</td><td>Endpoint'i doğrula, dashboard'u kaydet, tekrar sync et</td></tr>
           <tr><td>Prometheus metric görünmüyor</td><td>Exporter scrape edilmiyor</td><td><code>/metrics</code> endpoint'ini ve Prometheus target durumunu kontrol et</td></tr>
+          <tr><td>Yeni chart özellikleri görünmüyor</td><td>Tarayici eski plugin bundle'ini cache'ten kullanıyor</td><td>Hard refresh yap, gerekirse browser cache temizle</td></tr>
+          <tr><td>Confidence score metriği yok</td><td>Eski exporter sürümü ayakta</td><td>Alert bundle ile exporter'i de guncelle ve yeniden baslat</td></tr>
+          <tr><td>Dashboard silindi ama score feed devam ediyor</td><td>Sync edilmis rule exporter state'te kaldı</td><td>Portable modda <code>.portable-runtime/dynamic_rules.json</code>, native kurulumda state dizinini temizleyip exporter'i yeniden baslat</td></tr>
+          <tr><td>Ayni metric birden fazla kez score olarak besleniyor</td><td>Ayni query farkli dashboard/panel kopyalarindan tekrar sync edilmis</td><td>Rule prefix ve panel kopyalarini kontrol et; gereksiz kayitlari exporter state'ten kaldir</td></tr>
         </tbody>
       </table>
 

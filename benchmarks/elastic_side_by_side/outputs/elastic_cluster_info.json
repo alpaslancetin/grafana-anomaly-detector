@@ -1,0 +1,118 @@
+{
+  "cluster_url": "http://localhost:9200",
+  "root": {
+    "name": "17f9367200c5",
+    "cluster_name": "docker-cluster",
+    "cluster_uuid": "kQZngyeKRya6VRO0t0jQYA",
+    "version": {
+      "number": "9.3.2",
+      "build_flavor": "default",
+      "build_type": "docker",
+      "build_hash": "43a703737aab6baefa748bc7b69e4054926f2b2c",
+      "build_date": "2026-03-16T13:12:56.143057855Z",
+      "build_snapshot": false,
+      "lucene_version": "10.3.2",
+      "minimum_wire_compatibility_version": "8.19.0",
+      "minimum_index_compatibility_version": "8.0.0"
+    },
+    "tagline": "You Know, for Search"
+  },
+  "license": {
+    "license": {
+      "status": "active",
+      "uid": "a1f2ae23-f455-4569-ba87-d28683e93837",
+      "type": "trial",
+      "issue_date": "2026-03-27T20:30:33.100Z",
+      "issue_date_in_millis": 1774643433100,
+      "expiry_date": "2026-04-26T20:30:33.100Z",
+      "expiry_date_in_millis": 1777235433100,
+      "max_nodes": 1000,
+      "max_resource_units": null,
+      "issued_to": "docker-cluster",
+      "issuer": "elasticsearch",
+      "start_date_in_millis": -1
+    }
+  },
+  "ml_info": {
+    "defaults": {
+      "anomaly_detectors": {
+        "model_memory_limit": "1gb",
+        "categorization_examples_limit": 4,
+        "model_snapshot_retention_days": 10,
+        "daily_model_snapshot_retention_after_days": 1,
+        "categorization_analyzer": {
+          "char_filter": [
+            "first_line_with_letters"
+          ],
+          "tokenizer": "ml_standard",
+          "filter": [
+            {
+              "type": "stop",
+              "stopwords": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+                "Mon",
+                "Tue",
+                "Wed",
+                "Thu",
+                "Fri",
+                "Sat",
+                "Sun",
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December",
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+                "GMT",
+                "UTC"
+              ]
+            },
+            {
+              "type": "limit",
+              "max_token_count": "100"
+            }
+          ]
+        }
+      },
+      "datafeeds": {
+        "scroll_size": 1000
+      }
+    },
+    "upgrade_mode": false,
+    "native_code": {
+      "version": "9.3.2",
+      "build_hash": "7edc0b26a32eb3"
+    },
+    "limits": {
+      "total_ml_memory": "6604mb",
+      "total_ml_processors": 8,
+      "max_model_memory_limit": "6564mb",
+      "effective_max_model_memory_limit": "6564mb",
+      "max_single_ml_node_processors": 8
+    }
+  }
+}

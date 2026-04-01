@@ -1,0 +1,104 @@
+{
+  "count": 2,
+  "records": [
+    {
+      "job_id": "benchmark-seasonal_hourly_spike",
+      "result_type": "record",
+      "probability": 9.161065680637752e-13,
+      "multi_bucket_impact": -5.0,
+      "record_score": 74.2999481248529,
+      "initial_record_score": 74.2999481248529,
+      "bucket_span": 3600,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700643600000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        114.72622731342626
+      ],
+      "actual": [
+        158.752372
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "seasonal_hourly_spike"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "anomaly_type": "spike",
+        "anomaly_length": 2,
+        "single_bucket_impact": 22,
+        "multi_bucket_impact": 1,
+        "anomaly_characteristics_impact": 1,
+        "lower_confidence_bound": 111.80248680412747,
+        "typical_value": 115.29711426606629,
+        "upper_confidence_bound": 120.07311764802535
+      },
+      "scenario": [
+        "seasonal_hourly_spike"
+      ],
+      "service": [
+        "checkout"
+      ]
+    },
+    {
+      "job_id": "benchmark-seasonal_hourly_spike",
+      "result_type": "record",
+      "probability": 3.5582124783586464e-05,
+      "multi_bucket_impact": -5.0,
+      "record_score": 23.18542,
+      "initial_record_score": 74.25409187272474,
+      "bucket_span": 3600,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700640000000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        118.37103264818363
+      ],
+      "actual": [
+        162.618308
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "seasonal_hourly_spike"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "single_bucket_impact": 9,
+        "lower_confidence_bound": 112.33552618562013,
+        "typical_value": 119.65611156765752,
+        "upper_confidence_bound": 128.65450779796296,
+        "high_variance_penalty": true
+      },
+      "scenario": [
+        "seasonal_hourly_spike"
+      ],
+      "service": [
+        "checkout"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "grafana-anomaly-benchmark-presentation",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Source deck for the revised Grafana Anomaly Detector benchmark presentation",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node build_benchmark_deck.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}

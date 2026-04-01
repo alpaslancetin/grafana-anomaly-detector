@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <rect width="1200" height="760" fill="#fffdf8" rx="24"/>
+  <text x="40" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="700" fill="#0f172a">Elastic result view</text>
+  <text x="40" y="68" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#475569">latency_spike_mad imported from Elastic records export | threshold=1.0</text>
+  <text x="40" y="108" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">Signal with Elastic anomaly markers</text>
+  <rect x="70" y="90" width="1100" height="270" fill="#ffffff" stroke="#dbe4f0"/>
+  <line x1="70" y1="360" x2="1170" y2="360" stroke="#94a3b8"/>
+  <line x1="70" y1="90" x2="70" y2="360" stroke="#94a3b8"/>
+  <polyline points="70.0,333.6 81.6,322.4 93.2,318.1 104.7,328.6 116.3,334.3 127.9,325.5 139.5,321.7 151.1,317.4 162.6,333.5 174.2,334.0 185.8,320.2 197.4,321.8 208.9,314.4 220.5,318.2 232.1,325.8 243.7,327.0 255.3,307.2 266.8,327.1 278.4,330.5 290.0,333.0 301.6,324.4 313.2,324.1 324.7,327.5 336.3,325.5 347.9,323.2 359.5,320.3 371.1,317.4 382.6,323.6 394.2,337.5 405.8,320.2 417.4,334.9 428.9,326.3 440.5,335.3 452.1,325.0 463.7,330.5 475.3,323.6 486.8,302.1 498.4,325.4 510.0,319.2 521.6,334.3 533.2,327.1 544.7,320.5 556.3,325.7 567.9,322.5 579.5,324.3 591.1,332.1 602.6,321.1 614.2,330.7 625.8,312.1 637.4,328.6 648.9,320.3 660.5,325.0 672.1,318.4 683.7,329.2 695.3,318.1 706.8,325.9 718.4,316.3 730.0,320.7 741.6,324.1 753.2,330.5 764.7,112.5 776.3,118.3 787.9,116.2 799.5,118.2 811.1,321.2 822.6,321.5 834.2,323.1 845.8,323.6 857.4,323.8 868.9,329.2 880.5,332.1 892.1,327.8 903.7,321.0 915.3,314.6 926.8,318.3 938.4,317.7 950.0,319.7 961.6,320.2 973.2,323.8 984.7,319.7 996.3,312.7 1007.9,327.3 1019.5,329.9 1031.1,311.4 1042.6,323.4 1054.2,318.3 1065.8,319.0 1077.4,333.0 1088.9,308.2 1100.5,312.7 1112.1,323.8 1123.7,319.8 1135.3,324.2 1146.8,331.2 1158.4,325.8 1170.0,322.5" fill="none" stroke="#334155" stroke-width="2.5"/>
+  <line x1="753.2" y1="354.3" x2="753.2" y2="287.0" stroke="#86efac" stroke-width="3" stroke-linecap="round"/><line x1="764.7" y1="364.3" x2="764.7" y2="269.2" stroke="#86efac" stroke-width="3" stroke-linecap="round"/><line x1="776.3" y1="371.4" x2="776.3" y2="254.1" stroke="#86efac" stroke-width="3" stroke-linecap="round"/><line x1="787.9" y1="377.4" x2="787.9" y2="239.1" stroke="#86efac" stroke-width="3" stroke-linecap="round"/><line x1="799.5" y1="376.9" x2="799.5" y2="240.1" stroke="#86efac" stroke-width="3" stroke-linecap="round"/><line x1="811.1" y1="376.4" x2="811.1" y2="241.0" stroke="#86efac" stroke-width="3" stroke-linecap="round"/>
+  <rect x="750.2" y="319.9" width="6" height="6" fill="#2563eb"/><rect x="761.7" y="318.2" width="6" height="6" fill="#2563eb"/><rect x="773.3" y="316.5" width="6" height="6" fill="#2563eb"/><rect x="784.9" y="314.5" width="6" height="6" fill="#2563eb"/><rect x="796.5" y="314.5" width="6" height="6" fill="#2563eb"/><rect x="808.1" y="314.6" width="6" height="6" fill="#2563eb"/>
+  <circle cx="753.2" cy="330.5" r="5.5" fill="#16a34a" stroke="#14532d" stroke-width="1"/><circle cx="764.7" cy="112.5" r="5.5" fill="#16a34a" stroke="#14532d" stroke-width="1"/><circle cx="776.3" cy="118.3" r="5.5" fill="#16a34a" stroke="#14532d" stroke-width="1"/><circle cx="787.9" cy="116.2" r="5.5" fill="#f59e0b" stroke="#14532d" stroke-width="1"/><circle cx="799.5" cy="118.2" r="5.5" fill="#f59e0b" stroke="#14532d" stroke-width="1"/><circle cx="811.1" cy="321.2" r="5.5" fill="#f59e0b" stroke="#14532d" stroke-width="1"/>
+  <text x="40" y="448" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">Elastic record_score</text>
+  <rect x="70" y="430" width="1100" height="220" fill="#ffffff" stroke="#dbe4f0"/>
+  <line x1="70" y1="650" x2="1170" y2="650" stroke="#94a3b8"/>
+  <line x1="70" y1="430" x2="70" y2="650" stroke="#94a3b8"/>
+  <line x1="70" y1="627.9" x2="1170" y2="627.9" stroke="#f59e0b" stroke-width="2" stroke-dasharray="7 5"/>
+  <polyline points="753.2,448.3 764.7,568.3 776.3,624.7 787.9,628.8 799.5,630.6 811.1,631.2" fill="none" stroke="#16a34a" stroke-width="2.5"/>
+  <circle cx="753.2" cy="448.3" r="4.5" fill="#16a34a"/><circle cx="764.7" cy="568.3" r="4.5" fill="#16a34a"/><circle cx="776.3" cy="624.7" r="4.5" fill="#16a34a"/><circle cx="787.9" cy="628.8" r="4.5" fill="#16a34a"/><circle cx="799.5" cy="630.6" r="4.5" fill="#16a34a"/><circle cx="811.1" cy="631.2" r="4.5" fill="#16a34a"/>
+  <g transform="translate(40, 690)">
+    <circle cx="0" cy="0" r="5" fill="#16a34a" stroke="#14532d" stroke-width="1"/>
+    <text x="14" y="5" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#334155">Elastic anomaly (score >= threshold)</text>
+    <circle cx="290" cy="0" r="5" fill="#f59e0b" stroke="#92400e" stroke-width="1"/>
+    <text x="304" y="5" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#334155">Elastic record below threshold</text>
+    <rect x="570" y="-4" width="8" height="8" fill="#2563eb"/>
+    <text x="586" y="5" font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#334155">Elastic typical</text>
+  </g>
+</svg>

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-
-import yaml
+from typing import Any
 
 from .models import (
     AppConfig,
@@ -18,6 +17,12 @@ from .models import (
 
 class ConfigError(RuntimeError):
     pass
+
+
+try:
+    import yaml  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - fallback path for portable mode
+    yaml = None
 
 
 def _env_override(name: str, value: object) -> object:
@@ -49,9 +54,128 @@ def _as_positive_float(value: object, field_name: str, default: float) -> float:
     return parsed
 
 
+def _parse_scalar(value: str) -> object:
+    stripped = value.strip()
+    if stripped == '':
+        return ''
+    if stripped in {'[]', '[ ]'}:
+        return []
+    lowered = stripped.lower()
+    if lowered == 'true':
+        return True
+    if lowered == 'false':
+        return False
+    if lowered in {'null', 'none'}:
+        return None
+    if (stripped.startswith('"') and stripped.endswith('"')) or (stripped.startswith("'") and stripped.endswith("'")):
+        return stripped[1:-1]
+    try:
+        if any(token in stripped for token in ('.', 'e', 'E')):
+            return float(stripped)
+        return int(stripped)
+    except ValueError:
+        return stripped
+
+
+def _load_yaml_with_fallback(raw_text: str) -> dict[str, Any]:
+    if yaml is not None:
+        return yaml.safe_load(raw_text) or {}
+
+    data: dict[str, Any] = {}
+    section: str | None = None
+    current_rule: dict[str, Any] | None = None
+    current_nested_map: dict[str, Any] | None = None
+
+    for raw_line in raw_text.splitlines():
+        if not raw_line.strip():
+            continue
+        line = raw_line.split('#', 1)[0].rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(' '))
+        stripped = line.strip()
+
+        if indent == 0:
+            current_rule = None
+            current_nested_map = None
+            if ':' not in stripped:
+                raise ConfigError(f'Unsupported config line: {raw_line}')
+            key, rest = stripped.split(':', 1)
+            key = key.strip()
+            rest = rest.strip()
+            if key == 'global':
+                section = 'global'
+                data['global'] = {} if rest == '' else _parse_scalar(rest)
+                if not isinstance(data['global'], dict):
+                    raise ConfigError('global must be a mapping.')
+            elif key == 'rules':
+                section = 'rules'
+                data['rules'] = [] if rest in {'', '[]', '[ ]'} else _parse_scalar(rest)
+                if not isinstance(data['rules'], list):
+                    raise ConfigError('rules must be a list.')
+            else:
+                data[key] = _parse_scalar(rest)
+            continue
+
+        if section == 'global':
+            if indent < 2 or ':' not in stripped:
+                raise ConfigError(f'Unsupported global config line: {raw_line}')
+            key, rest = stripped.split(':', 1)
+            data['global'][key.strip()] = _parse_scalar(rest.strip())
+            continue
+
+        if section != 'rules':
+            raise ConfigError(f'Unsupported config structure near line: {raw_line}')
+
+        if indent == 2 and stripped.startswith('- '):
+            rule_line = stripped[2:].strip()
+            current_rule = {}
+            current_nested_map = None
+            data['rules'].append(current_rule)
+            if rule_line:
+                if ':' not in rule_line:
+                    raise ConfigError(f'Unsupported rule line: {raw_line}')
+                key, rest = rule_line.split(':', 1)
+                rest = rest.strip()
+                if rest == '':
+                    current_rule[key.strip()] = {}
+                    current_nested_map = current_rule[key.strip()]
+                else:
+                    current_rule[key.strip()] = _parse_scalar(rest)
+            continue
+
+        if current_rule is None:
+            raise ConfigError(f'Rule entry expected before line: {raw_line}')
+
+        if indent == 4:
+            if ':' not in stripped:
+                raise ConfigError(f'Unsupported rule property line: {raw_line}')
+            key, rest = stripped.split(':', 1)
+            key = key.strip()
+            rest = rest.strip()
+            if rest == '':
+                current_rule[key] = {}
+                current_nested_map = current_rule[key]
+            else:
+                current_rule[key] = _parse_scalar(rest)
+                current_nested_map = None
+            continue
+
+        if indent == 6 and current_nested_map is not None:
+            if ':' not in stripped:
+                raise ConfigError(f'Unsupported nested mapping line: {raw_line}')
+            key, rest = stripped.split(':', 1)
+            current_nested_map[key.strip()] = _parse_scalar(rest.strip())
+            continue
+
+        raise ConfigError(f'Unsupported YAML subset near line: {raw_line}')
+
+    return data
+
+
 def load_config(path: str | Path) -> AppConfig:
     raw_text = Path(path).read_text(encoding='utf-8')
-    raw = yaml.safe_load(raw_text) or {}
+    raw = _load_yaml_with_fallback(raw_text)
     global_raw = raw.get('global', {}) or {}
     rules_raw = raw.get('rules', [])
 

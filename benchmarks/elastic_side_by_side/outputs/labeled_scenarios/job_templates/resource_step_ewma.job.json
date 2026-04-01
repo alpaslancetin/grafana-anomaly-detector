@@ -1,0 +1,30 @@
+{
+  "job_id": "benchmark-resource_step_ewma",
+  "description": "Elastic side-by-side benchmark for resource_step_ewma",
+  "model_plot_config": {
+    "enabled": true
+  },
+  "analysis_config": {
+    "bucket_span": "5m",
+    "detectors": [
+      {
+        "function": "high_mean",
+        "field_name": "metric_value",
+        "detector_description": "resource_step_ewma detector"
+      }
+    ],
+    "influencers": [
+      "service",
+      "scenario"
+    ]
+  },
+  "data_description": {
+    "time_field": "timestamp_epoch_seconds",
+    "time_format": "epoch"
+  },
+  "custom_settings": {
+    "benchmark_scenario": "resource_step_ewma",
+    "benchmark_expected_points": 120,
+    "benchmark_labeled_anomaly_count": 8
+  }
+}

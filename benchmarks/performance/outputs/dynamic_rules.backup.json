@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "dashboard_uid": "adgkpv2",
+      "dashboard_title": "Anomaly Alp",
+      "panel_id": 1,
+      "panel_title": "test anomaly alp",
+      "ref_id": "A",
+      "sync_hash": "{\"dashboardUid\":\"adgkpv2\",\"panelTitle\":\"test anomaly alp\",\"source\":\"saved\",\"ruleNamePrefix\":\"\",\"targets\":[{\"refId\":\"A\",\"expr\":\"avg_over_time(demo_latency_ms[5m])\",\"datasourceUid\":\"anomaly-demo-prometheus\",\"datasourceType\":\"prometheus\"}],\"resolvedOptions\":{\"setupMode\":\"recommended\",\"metricPreset\":\"auto\",\"effectiveMetricPreset\":\"latency\",\"detectionMode\":\"single\",\"algorithm\":\"mad\",\"sensitivity\":2.4,\"baselineWindow\":12,\"seasonalitySamples\":24,\"seasonalRefinement\":\"cycle\",\"severityPreset\":\"page_first\"}}",
+      "created_at": 1773694647.197897,
+      "updated_at": 1773694647.197897,
+      "rule": {
+        "name": "adgkpv2_panel_1",
+        "query": "avg_over_time(demo_latency_ms[5m])",
+        "algorithm": "mad",
+        "threshold": 2.4,
+        "baseline_window": 12,
+        "seasonality_samples": 24,
+        "seasonal_refinement": "cycle",
+        "severity_preset": "page_first",
+        "aggregation": "max",
+        "labels": {
+          "dashboard_uid": "adgkpv2",
+          "dashboard_title": "Anomaly Alp",
+          "panel_id": "1",
+          "panel_title": "test anomaly alp",
+          "query_ref_id": "A",
+          "feed_source": "grafana_panel",
+          "detection_mode": "single",
+          "metric_preset": "latency",
+          "datasource_uid": "anomaly-demo-prometheus",
+          "datasource_type": "prometheus"
+        },
+        "description": "Grafana panel sync for test anomaly alp [A]"
+      }
+    },
+    {
+      "dashboard_uid": "prometheus-live-anomaly-demo",
+      "dashboard_title": "Prometheus Live Anomaly Demo",
+      "panel_id": 1,
+      "panel_title": "Prometheus latency anomaly (multi metric)",
+      "ref_id": "A",
+      "sync_hash": "{\"dashboardUid\":\"prometheus-live-anomaly-demo\",\"panelTitle\":\"Prometheus latency anomaly (multi metric)\",\"source\":\"saved\",\"ruleNamePrefix\":\"\",\"targets\":[{\"refId\":\"A\",\"expr\":\"demo_latency_ms{service=\\\"checkout\\\",environment=\\\"demo\\\"}\",\"datasourceUid\":\"anomaly-demo-prometheus\",\"datasourceType\":\"prometheus\"}],\"resolvedOptions\":{\"setupMode\":\"recommended\",\"metricPreset\":\"latency\",\"effectiveMetricPreset\":\"latency\",\"detectionMode\":\"multi\",\"algorithm\":\"mad\",\"sensitivity\":2.4,\"baselineWindow\":12,\"seasonalitySamples\":24,\"seasonalRefinement\":\"cycle\",\"severityPreset\":\"page_first\"}}",
+      "created_at": 1773694268.3118455,
+      "updated_at": 1773694268.3118455,
+      "rule": {
+        "name": "prometheus_live_anomaly_demo_panel_1",
+        "query": "demo_latency_ms{service=\"checkout\",environment=\"demo\"}",
+        "algorithm": "mad",
+        "threshold": 2.4,
+        "baseline_window": 12,
+        "seasonality_samples": 24,
+        "seasonal_refinement": "cycle",
+        "severity_preset": "page_first",
+        "aggregation": "top3_avg",
+        "labels": {
+          "dashboard_uid": "prometheus-live-anomaly-demo",
+          "dashboard_title": "Prometheus Live Anomaly Demo",
+          "panel_id": "1",
+          "panel_title": "Prometheus latency anomaly (multi metric)",
+          "query_ref_id": "A",
+          "feed_source": "grafana_panel",
+          "detection_mode": "multi",
+          "metric_preset": "latency",
+          "datasource_uid": "anomaly-demo-prometheus",
+          "datasource_type": "prometheus"
+        },
+        "description": "Grafana panel sync for Prometheus latency anomaly (multi metric) [A]"
+      }
+    },
+    {
+      "dashboard_uid": "prometheus-live-anomaly-demo",
+      "dashboard_title": "Prometheus Live Anomaly Demo",
+      "panel_id": 2,
+      "panel_title": "Prometheus request anomaly (single metric)",
+      "ref_id": "A",
+      "sync_hash": "{\"dashboardUid\":\"prometheus-live-anomaly-demo\",\"panelTitle\":\"Prometheus request anomaly (single metric)\",\"source\":\"saved\",\"ruleNamePrefix\":\"\",\"targets\":[{\"refId\":\"A\",\"expr\":\"demo_requests_per_second{service=\\\"checkout\\\",environment=\\\"demo\\\"}\",\"datasourceUid\":\"anomaly-demo-prometheus\",\"datasourceType\":\"prometheus\"}],\"resolvedOptions\":{\"setupMode\":\"recommended\",\"metricPreset\":\"traffic\",\"effectiveMetricPreset\":\"traffic\",\"detectionMode\":\"single\",\"algorithm\":\"ewma\",\"sensitivity\":2.1,\"baselineWindow\":14,\"seasonalitySamples\":24,\"seasonalRefinement\":\"cycle\",\"severityPreset\":\"warning_first\"}}",
+      "created_at": 1773694268.2646782,
+      "updated_at": 1773694268.2646782,
+      "rule": {
+        "name": "prometheus_live_anomaly_demo_panel_2",
+        "query": "demo_requests_per_second{service=\"checkout\",environment=\"demo\"}",
+        "algorithm": "ewma",
+        "threshold": 2.1,
+        "baseline_window": 14,
+        "seasonality_samples": 24,
+        "seasonal_refinement": "cycle",
+        "severity_preset": "warning_first",
+        "aggregation": "max",
+        "labels": {
+          "dashboard_uid": "prometheus-live-anomaly-demo",
+          "dashboard_title": "Prometheus Live Anomaly Demo",
+          "panel_id": "2",
+          "panel_title": "Prometheus request anomaly (single metric)",
+          "query_ref_id": "A",
+          "feed_source": "grafana_panel",
+          "detection_mode": "single",
+          "metric_preset": "traffic",
+          "datasource_uid": "anomaly-demo-prometheus",
+          "datasource_type": "prometheus"
+        },
+        "description": "Grafana panel sync for Prometheus request anomaly (single metric) [A]"
+      }
+    }
+  ]
+}

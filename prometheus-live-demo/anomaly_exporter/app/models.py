@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import DefaultDict, Deque
-
-SeverityThresholds = dict[str, int]
+import sys
+from typing import DefaultDict, Deque, Dict
+SeverityThresholds = Dict[str, int]
 
 SEVERITY_THRESHOLDS: dict[str, SeverityThresholds] = {
     'warning_first': {'low': 35, 'medium': 55, 'high': 72, 'critical': 88},
@@ -12,15 +12,16 @@ SEVERITY_THRESHOLDS: dict[str, SeverityThresholds] = {
     'page_first': {'low': 45, 'medium': 65, 'high': 82, 'critical': 95},
 }
 
-SUPPORTED_ALGORITHMS = {'zscore', 'mad', 'ewma', 'seasonal'}
+SUPPORTED_ALGORITHMS = {'zscore', 'mad', 'ewma', 'seasonal', 'level_shift'}
 SUPPORTED_SEASONAL_REFINEMENTS = {'cycle', 'hour_of_day', 'weekday_hour'}
 SUPPORTED_SEVERITY_PRESETS = set(SEVERITY_THRESHOLDS.keys())
 SUPPORTED_AGGREGATIONS = {'max', 'top3_avg'}
 MIN_BASELINE_POINTS = 3
-MIN_SEASONAL_SAMPLES = 2
+MIN_SEASONAL_SAMPLES = 3
+DATACLASS_KWARGS = {'slots': True} if sys.version_info >= (3, 10) else {}
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class GlobalConfig:
     prometheus_url: str = 'http://prometheus:9090'
     evaluation_interval_seconds: int = 5
@@ -30,7 +31,7 @@ class GlobalConfig:
     config_reload_interval_seconds: int = 10
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class RuleConfig:
     name: str
     query: str
@@ -50,26 +51,26 @@ class RuleConfig:
         return max(256, seasonal_depth + 8, self.baseline_window * 6)
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class AppConfig:
     global_config: GlobalConfig
     rules: list[RuleConfig]
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class PrometheusSample:
     labels: dict[str, str]
     value: float
     timestamp: float
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class SampleHistoryEntry:
     timestamp: float
     value: float
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class SeriesState:
     history: Deque[SampleHistoryEntry]
     residuals: Deque[float]
@@ -85,15 +86,18 @@ class SeriesState:
         )
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class SeverityState:
     raw_score: float
     normalized_score: float
     severity_label: str
     is_anomaly: bool
+    confidence_score: float
+    confidence_label: str
+    data_quality_label: str
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class SeriesSnapshot:
     rule_name: str
     source_metric: str
@@ -104,16 +108,22 @@ class SeriesSnapshot:
     upper: float | None
     deviation: float | None
     raw_score: float
+    point_raw_score: float
+    window_raw_score: float
+    score_driver: str
     normalized_score: float
     severity_label: str
     is_anomaly: bool
+    confidence_score: float
+    confidence_label: str
+    data_quality_label: str
     threshold: float
     algorithm: str
     severity_preset: str
     timestamp: float
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class RuleSnapshot:
     name: str
     algorithm: str

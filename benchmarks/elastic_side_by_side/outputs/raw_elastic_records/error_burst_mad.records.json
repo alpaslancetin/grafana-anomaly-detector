@@ -1,0 +1,245 @@
+{
+  "count": 5,
+  "records": [
+    {
+      "job_id": "benchmark-error_burst_mad",
+      "result_type": "record",
+      "probability": 2.0906623719968614e-05,
+      "multi_bucket_impact": -5.0,
+      "record_score": 48.74238748750864,
+      "initial_record_score": 48.74238748750864,
+      "bucket_span": 300,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700013000000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        1.2978899092375276
+      ],
+      "actual": [
+        8.79196
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "error_burst_mad"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "single_bucket_impact": 5,
+        "multi_bucket_impact": 3,
+        "lower_confidence_bound": 0.0,
+        "typical_value": 1.2978899092375276,
+        "upper_confidence_bound": 3.1199847092554465
+      },
+      "scenario": [
+        "error_burst_mad"
+      ],
+      "service": [
+        "checkout"
+      ]
+    },
+    {
+      "job_id": "benchmark-error_burst_mad",
+      "result_type": "record",
+      "probability": 0.00045955958237891263,
+      "multi_bucket_impact": -1.52,
+      "record_score": 17.04565,
+      "initial_record_score": 18.79889979069094,
+      "bucket_span": 300,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700013300000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        1.3742735990722927
+      ],
+      "actual": [
+        7.609014
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "error_burst_mad"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "single_bucket_impact": 3,
+        "multi_bucket_impact": 3,
+        "lower_confidence_bound": 0.0,
+        "typical_value": 1.3742735990722927,
+        "upper_confidence_bound": 3.793773317368535
+      },
+      "scenario": [
+        "error_burst_mad"
+      ],
+      "service": [
+        "checkout"
+      ]
+    },
+    {
+      "job_id": "benchmark-error_burst_mad",
+      "result_type": "record",
+      "probability": 0.002434797205601876,
+      "multi_bucket_impact": -0.31,
+      "record_score": 3.4073232464941663,
+      "initial_record_score": 3.4073232464941663,
+      "bucket_span": 300,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700013600000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        1.481285126054617
+      ],
+      "actual": [
+        7.43654
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "error_burst_mad"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "single_bucket_impact": 3,
+        "multi_bucket_impact": 2,
+        "lower_confidence_bound": 0.0,
+        "typical_value": 1.481285126054617,
+        "upper_confidence_bound": 4.55392590286685
+      },
+      "scenario": [
+        "error_burst_mad"
+      ],
+      "service": [
+        "checkout"
+      ]
+    },
+    {
+      "job_id": "benchmark-error_burst_mad",
+      "result_type": "record",
+      "probability": 0.006332091588540245,
+      "multi_bucket_impact": -0.17,
+      "record_score": 1.2030241992080897,
+      "initial_record_score": 1.2030241992080897,
+      "bucket_span": 300,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700013900000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        1.6044254101555502
+      ],
+      "actual": [
+        7.891517
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "error_burst_mad"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "single_bucket_impact": 2,
+        "multi_bucket_impact": 2,
+        "lower_confidence_bound": 0.0,
+        "typical_value": 1.6044254101555502,
+        "upper_confidence_bound": 5.369820580446695
+      },
+      "scenario": [
+        "error_burst_mad"
+      ],
+      "service": [
+        "checkout"
+      ]
+    },
+    {
+      "job_id": "benchmark-error_burst_mad",
+      "result_type": "record",
+      "probability": 0.00939266481047151,
+      "multi_bucket_impact": -0.41,
+      "record_score": 0.7543053866360135,
+      "initial_record_score": 0.7543053866360135,
+      "bucket_span": 300,
+      "detector_index": 0,
+      "is_interim": false,
+      "timestamp": 1700014200000,
+      "function": "high_mean",
+      "function_description": "mean",
+      "typical": [
+        1.7323431683934372
+      ],
+      "actual": [
+        9.490835
+      ],
+      "field_name": "metric_value",
+      "influencers": [
+        {
+          "influencer_field_name": "scenario",
+          "influencer_field_values": [
+            "error_burst_mad"
+          ]
+        },
+        {
+          "influencer_field_name": "service",
+          "influencer_field_values": [
+            "checkout"
+          ]
+        }
+      ],
+      "anomaly_score_explanation": {
+        "single_bucket_impact": 2,
+        "multi_bucket_impact": 2,
+        "lower_confidence_bound": 0.0,
+        "typical_value": 1.7323431683934372,
+        "upper_confidence_bound": 6.410641989614291
+      },
+      "scenario": [
+        "error_burst_mad"
+      ],
+      "service": [
+        "checkout"
+      ]
+    }
+  ]
+}

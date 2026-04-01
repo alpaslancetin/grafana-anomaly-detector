@@ -3,12 +3,15 @@ import {
   BucketSpan,
   DetectionAlgorithm,
   DetectionMode,
+  MarkerShapeMode,
   MetricPreset,
   ScoreFeedMode,
   SeasonalRefinement,
   SetupMode,
   SeverityPreset,
   SimpleOptions,
+  TimeAxisDensity,
+  TimeAxisPlacement,
 } from './types';
 import { SimplePanel } from './components/SimplePanel';
 
@@ -85,6 +88,11 @@ const metricPresets: Array<{ label: string; value: Exclude<MetricPreset, 'custom
     value: 'business',
     description: 'Useful for revenue, signups, conversions, and other cyclical business metrics.',
   },
+  {
+    label: 'Subtle level shift / drift',
+    value: 'level_shift',
+    description: 'Best when the baseline changes gradually or steps up/down without a single sharp spike.',
+  },
 ];
 
 const bucketSpans: Array<{ label: string; value: BucketSpan; description: string }> = [
@@ -141,6 +149,11 @@ const algorithms: Array<{ label: string; value: DetectionAlgorithm; description:
     value: 'seasonal',
     description: 'Compares each point with similar positions from earlier cycles.',
   },
+  {
+    label: 'Level shift detector',
+    value: 'level_shift',
+    description: 'Looks for sustained baseline changes and subtle step-ups that build over several buckets.',
+  },
 ];
 
 const seasonalRefinements: Array<{ label: string; value: SeasonalRefinement; description: string }> = [
@@ -176,6 +189,55 @@ const severityPresets: Array<{ label: string; value: SeverityPreset; description
     label: 'Page first',
     value: 'page_first',
     description: 'Keeps high and critical severities stricter for paging workflows.',
+  },
+];
+
+const timeAxisDensities: Array<{ label: string; value: TimeAxisDensity; description: string }> = [
+  {
+    label: 'Auto (Recommended)',
+    value: 'auto',
+    description: 'Choose a readable time tick density automatically from the panel width and visible range.',
+  },
+  {
+    label: 'Compact',
+    value: 'compact',
+    description: 'Use fewer time labels for dense dashboards and smaller panels.',
+  },
+  {
+    label: 'Balanced',
+    value: 'balanced',
+    description: 'Keep a mid-density time axis for general dashboard use.',
+  },
+  {
+    label: 'Dense',
+    value: 'dense',
+    description: 'Show more time labels for close operational tracking.',
+  },
+];
+
+const timeAxisPlacements: Array<{ label: string; value: TimeAxisPlacement; description: string }> = [
+  {
+    label: 'Bottom only',
+    value: 'bottom',
+    description: 'Show time labels only on the bottom axis.',
+  },
+  {
+    label: 'Top + bottom',
+    value: 'top_and_bottom',
+    description: 'Add a second time guide on top for faster cross-checking during incident review.',
+  },
+];
+
+const markerShapeModes: Array<{ label: string; value: MarkerShapeMode; description: string }> = [
+  {
+    label: 'Severity shapes (Recommended)',
+    value: 'severity',
+    description: 'Use different marker shapes for low, medium, high, and critical anomalies.',
+  },
+  {
+    label: 'Classic circles',
+    value: 'classic',
+    description: 'Keep the previous circle-style anomaly markers.',
   },
 ];
 
@@ -335,6 +397,50 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
       path: 'showSummary',
       name: 'Show anomaly summary',
       defaultValue: true,
+      category: displayCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showInlineSeriesLabels',
+      name: 'Show inline series labels',
+      description: 'Show each series name at the right edge of the chart so the line identity stays visible without scanning the legend.',
+      defaultValue: true,
+      category: displayCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showFocusBand',
+      name: 'Show anomaly focus band',
+      description: 'Render a zoomed local band around the selected anomaly for faster incident review.',
+      defaultValue: true,
+      category: displayCategory,
+    })
+    .addSelect({
+      path: 'timeAxisDensity',
+      name: 'Time axis density',
+      description: 'Control how many time labels are shown on the chart.',
+      defaultValue: 'auto',
+      settings: {
+        options: timeAxisDensities,
+      },
+      category: displayCategory,
+    })
+    .addSelect({
+      path: 'timeAxisPlacement',
+      name: 'Time axis placement',
+      description: 'Choose whether time labels are shown only at the bottom or on both top and bottom edges.',
+      defaultValue: 'top_and_bottom',
+      settings: {
+        options: timeAxisPlacements,
+      },
+      category: displayCategory,
+    })
+    .addSelect({
+      path: 'markerShapeMode',
+      name: 'Anomaly marker style',
+      description: 'Choose whether severity is communicated with different marker shapes or with classic circular markers.',
+      defaultValue: 'severity',
+      settings: {
+        options: markerShapeModes,
+      },
       category: displayCategory,
     })
     .addBooleanSwitch({
