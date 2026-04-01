@@ -54,10 +54,12 @@ This version focuses on three areas:
 
 ## Validation snapshot
 
-- Grafana target: `12.4.1`
+- Minimum supported Grafana: `11.6.7`
+- Live compatibility verified on: `11.6.7`, `12.4.1`
 - Plugin version: `1.2.0`
 - Tested flows include:
   - panel build and typecheck
+  - responsive dashboard, `viewPanel`, `d-solo`, and resize-redraw chart rendering
   - chart and inspector UX updates
   - score-feed export path
   - benchmark dataset comparisons

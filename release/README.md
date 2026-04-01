@@ -4,7 +4,7 @@ This folder contains the packaged outputs for `Grafana Anomaly Detector v1.2.0`.
 
 ## Minimum supported Grafana version
 
-This release line requires **Grafana `12.4.0` or later**.
+This release line requires **Grafana `11.6.7` or later**.
 
 ## Files
 
@@ -19,7 +19,8 @@ This release line requires **Grafana `12.4.0` or later**.
 
 ## Compatibility
 
-- Supported Grafana target for this release: `>= 12.4.0`
+- Supported Grafana target for this release: `>= 11.6.7`
+- Live compatibility verified on: `11.6.7`, `12.4.1`
 
 ## Notes
 

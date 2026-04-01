@@ -6,17 +6,18 @@ This repository contains the panel source code, the live Prometheus demo stack, 
 
 ## Minimum supported Grafana version
 
-This release line requires **Grafana `12.4.0` or later**.
+This release line requires **Grafana `11.6.7` or later**.
 
 The plugin manifest declares:
 
-- `grafanaDependency: >=12.4.0`
+- `grafanaDependency: >=11.6.7`
 
 ## Current release
 
 - Plugin version: `1.2.0`
 - Plugin ID: `alpas-anomalydetector-panel`
-- Validated Grafana target: `12.4.1`
+- Minimum supported Grafana target: `11.6.7`
+- Validated Grafana targets: `11.6.7`, `12.4.1`
 
 The plugin ID remains `alpas-anomalydetector-panel` for release compatibility with existing installations. Public repository paths and package names use neutral project naming.
 
@@ -55,7 +56,7 @@ The plugin ID remains `alpas-anomalydetector-panel` for release compatibility wi
 
 ### Runtime requirements
 
-- Grafana: `>= 12.4.0`
+- Grafana: `>= 11.6.7`
 - Prometheus: required only if you want score-feed based alerting
 
 ### Development requirements
@@ -67,7 +68,8 @@ The plugin ID remains `alpas-anomalydetector-panel` for release compatibility wi
 
 The current `v1.2.0` release is packaged and supported for:
 
-- `Grafana >= 12.4.0`
+- `Grafana >= 11.6.7`
+- Validated with live responsive and score-feed tests on `11.6.7` and `12.4.1`
 
 This dependency is declared in:
 

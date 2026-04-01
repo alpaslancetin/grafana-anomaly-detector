@@ -44,3 +44,4 @@ Thumbs.db
 # Runtime state
 /prometheus-live-demo/anomaly_exporter/state/*.json
 /release/alert-bundle/exporter/state/*.json
+/.compat/

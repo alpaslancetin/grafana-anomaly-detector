@@ -30,7 +30,14 @@ Requirements:
 
 - Node.js 22+
 - npm 10+
-- Grafana 12.4.x
+- Grafana 11.6.7+
+
+Validated compatibility:
+
+- Grafana 11.6.7
+- Grafana 12.4.1
+
+The minimum supported version declared by the plugin manifest is `>=11.6.7`.
 
 Commands:
 
