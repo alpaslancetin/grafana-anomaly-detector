@@ -41,9 +41,9 @@ This version focuses on three areas:
 
 ## Included assets
 
-- Plugin-only package: `release/alpas-anomalydetector-panel-plugin-only.zip`
-- Alert bundle: `release/alpas-anomaly-alert-bundle.zip`
-- Python 3.9 compatible alert bundle: `release/alpas-anomaly-alert-bundle-python39-compatible.zip`
+- Plugin-only package: `release/grafana-anomaly-detector-plugin.zip`
+- Alert bundle: `release/grafana-anomaly-detector-alert-bundle.zip`
+- Python 3.9 compatible alert bundle: `release/grafana-anomaly-detector-alert-bundle-python39.zip`
 - End-to-end tutorial:
   - `tutorial/Anomaly_Detector_End_to_End_TR.html`
   - `tutorial/Anomaly_Detector_End_to_End_TR.pdf`
@@ -77,8 +77,8 @@ This version focuses on three areas:
 
 ## Recommended release attachments
 
-- `alpas-anomalydetector-panel-plugin-only.zip`
-- `alpas-anomaly-alert-bundle.zip`
-- `alpas-anomaly-alert-bundle-python39-compatible.zip`
+- `grafana-anomaly-detector-plugin.zip`
+- `grafana-anomaly-detector-alert-bundle.zip`
+- `grafana-anomaly-detector-alert-bundle-python39.zip`
 - `Anomaly_Detector_End_to_End_TR.pdf`
 - benchmark presentation deck from `benchmarks/presentation/output/`

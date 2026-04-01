@@ -2,7 +2,7 @@
 
 A Grafana panel plugin for anomaly detection on time-series data, with an optional Prometheus score-feed exporter for operational alerting.
 
-This repository is intentionally kept simple. It contains the plugin source, the live Prometheus demo, and the release packages needed to install or evaluate the detector.
+This repository contains the panel source code, the live Prometheus demo stack, and the release packages needed to install or evaluate the detector in Grafana environments.
 
 ## Minimum supported Grafana version
 
@@ -17,6 +17,8 @@ The plugin manifest declares:
 - Plugin version: `1.2.0`
 - Plugin ID: `alpas-anomalydetector-panel`
 - Validated Grafana target: `12.4.1`
+
+The plugin ID remains `alpas-anomalydetector-panel` for release compatibility with existing installations. Public repository paths and package names use neutral project naming.
 
 ## What it does
 
@@ -36,17 +38,18 @@ The plugin manifest declares:
 
 ![Grafana Anomaly Detector multi metric view](assets/readme/grafana-multi-metric-premium.png)
 
-### Same dataset comparison
+### Score feed and export block
 
-![Grafana Anomaly Detector and Elastic ML side-by-side comparison](assets/readme/benchmark-side-by-side-latency.png)
+![Grafana Anomaly Detector score feed export block](assets/readme/score-feed-export.png)
 
 ## Repository layout
 
 | Path | Purpose |
 | --- | --- |
-| `alpas-anomalydetector-panel/` | Plugin source code |
+| `grafana-anomaly-detector-panel/` | Plugin source code |
 | `prometheus-live-demo/` | Local demo stack with Prometheus and exporter flow |
 | `release/` | Release packages and GitHub release notes |
+| `assets/readme/` | README screenshots used on GitHub |
 
 ## Requirements
 
@@ -68,15 +71,15 @@ The current `v1.2.0` release is packaged and supported for:
 
 This dependency is declared in:
 
-- `alpas-anomalydetector-panel/src/plugin.json`
-- `alpas-anomalydetector-panel/dist/plugin.json`
+- `grafana-anomaly-detector-panel/src/plugin.json`
+- `grafana-anomaly-detector-panel/dist/plugin.json`
 
 ## Quick start
 
 ### Plugin development
 
 ```bash
-cd alpas-anomalydetector-panel
+cd grafana-anomaly-detector-panel
 npm install
 npm run dev
 ```
@@ -103,13 +106,43 @@ Typical local endpoints:
 - Prometheus: `http://localhost:9091`
 - Exporter metrics: `http://localhost:9110/metrics`
 
+## Score feed exporter
+
+The score feed exporter turns panel-side anomaly settings into Prometheus metrics that can be used in Grafana Alerting or any Prometheus-compatible alerting workflow.
+
+Exporter source code lives in:
+
+- `prometheus-live-demo/anomaly_exporter/`
+
+Core flow:
+
+1. Build or open an anomaly panel in Grafana
+2. Set `Score feed mode` to `Auto` or `Manual`
+3. Point the panel to an exporter endpoint such as `http://127.0.0.1:9110`
+4. The panel syncs rule metadata to the exporter
+5. The exporter evaluates the PromQL source on a rolling basis and exposes Prometheus metrics
+
+Main exported metrics:
+
+- `grafana_anomaly_rule_score`
+- `grafana_anomaly_score`
+- `grafana_anomaly_confidence_score`
+
+Important behavior:
+
+- The score feed is a live rolling detector, not a replay of the dashboard time range
+- Exported scores are based on the synced rule configuration, PromQL lookback, and exporter history
+- Removing a dashboard does not automatically delete synced exporter rules unless they are cleaned from exporter state
+
 ## Release packages
 
 Main outputs under `release/`:
 
-- `alpas-anomalydetector-panel-plugin-only.zip`
-- `alpas-anomaly-alert-bundle.zip`
-- `alpas-anomaly-alert-bundle-python39-compatible.zip`
+- `grafana-anomaly-detector-plugin.zip`
+- `grafana-anomaly-detector-alert-bundle.zip`
+- `grafana-anomaly-detector-alert-bundle-python39.zip`
+
+The release folder is kept focused on packaged artifacts. Source code for the exporter remains under `prometheus-live-demo/anomaly_exporter/`.
 
 ## Alerting flow
 

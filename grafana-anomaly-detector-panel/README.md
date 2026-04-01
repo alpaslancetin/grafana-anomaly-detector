@@ -1,8 +1,10 @@
-# alpas-anomalydetector-panel
+# Grafana Anomaly Detector Panel
 
-Source code for the custom Grafana panel plugin used in the Grafana Anomaly Detector Lab.
+Source code for the custom Grafana panel plugin used in the Grafana Anomaly Detector project.
 
 This package is the UI and scoring layer of the project. It detects anomalies directly on time-series panels, visualizes expected behavior, and exposes export helpers that make the result operationally usable.
+
+The public source folder uses a neutral repository name, while the plugin ID remains `alpas-anomalydetector-panel` for compatibility with installed environments.
 
 ## What is inside
 
@@ -54,12 +56,21 @@ Relevant files:
 - `provisioning/dashboards/dashboard.json`
 - `provisioning/dashboards/prometheus-live-dashboard.json`
 
+## Score feed context
+
+This panel can sync anomaly rule metadata to the exporter used in the live demo stack. The exporter source lives under:
+
+- `../prometheus-live-demo/anomaly_exporter/`
+
+That exporter exposes Prometheus metrics such as:
+
+- `grafana_anomaly_rule_score`
+- `grafana_anomaly_score`
+- `grafana_anomaly_confidence_score`
+
 ## Related documentation
 
 - [Project root README](../README.md)
-- [Detailed Turkish tutorial](../tutorial/Anomaly_Detector_End_to_End_TR.html)
-- [Turkish usage summary](../KULLANIM_OZETI_TR.md)
-- [Turkish alerting guide](../ALERTING_TR.md)
 
 ## License
 
