@@ -26,6 +26,20 @@ The plugin manifest declares:
 - Exposes anomaly context such as expected value, deviation, confidence, data quality, and main reason
 - Optionally publishes alertable Prometheus metrics through the score-feed exporter
 
+## Screenshots
+
+### Single metric panel
+
+![Grafana Anomaly Detector single metric panel](assets/readme/grafana-single-metric-premium.png)
+
+### Multi-metric incident view
+
+![Grafana Anomaly Detector multi metric view](assets/readme/grafana-multi-metric-premium.png)
+
+### Same dataset comparison
+
+![Grafana Anomaly Detector and Elastic ML side-by-side comparison](assets/readme/benchmark-side-by-side-latency.png)
+
 ## Repository layout
 
 | Path | Purpose |
