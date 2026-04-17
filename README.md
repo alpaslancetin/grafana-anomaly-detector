@@ -11,7 +11,7 @@
 <p align="center">
   <img alt="Grafana compatibility" src="https://img.shields.io/badge/Grafana-11.6.7%2B-F46800?style=for-the-badge&logo=grafana&logoColor=white">
   <img alt="Validated versions" src="https://img.shields.io/badge/Validated-11.6.7%20%7C%2012.4.1-0F172A?style=for-the-badge">
-  <img alt="Plugin version" src="https://img.shields.io/badge/Plugin-v1.2.0-2563EB?style=for-the-badge">
+  <img alt="Plugin version" src="https://img.shields.io/badge/Plugin-v1.2.1-2563EB?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-16A34A?style=for-the-badge">
 </p>
 
@@ -93,6 +93,28 @@ The exporter turns panel-side anomaly settings into Prometheus metrics that can 
 - `grafana_anomaly_rule_score`
 - `grafana_anomaly_score`
 - `grafana_anomaly_confidence_score`
+
+**Minimum Python requirement**
+
+- minimum supported Python: `3.9`
+- recommended Python: `3.9.x`
+- `Python 3.6.8` is not supported
+
+**Release package**
+
+- [`release/grafana-anomaly-exporter-bundle-1.2.1.zip`](release/grafana-anomaly-exporter-bundle-1.2.1.zip)
+
+**Installation notes**
+
+- native RHEL install:
+  - `./install-exporter-rhel.sh http://PROMETHEUS_HOST:PORT`
+  - then `./enable-local-prometheus-scrape-rhel.sh`
+- portable mode:
+  - `./portable-exporter.sh start http://PROMETHEUS_HOST:PORT`
+- Grafana panel setting:
+  - `Score feed endpoint = http://EXPORTER_HOST:9110`
+- Prometheus must scrape the exporter endpoint:
+  - `127.0.0.1:9110` or the exporter host you expose
 
 **Important behavior**
 
@@ -185,13 +207,12 @@ Typical local endpoints:
 Main outputs under [`release/`](release):
 
 - `grafana-anomaly-detector-plugin.zip`
-- `grafana-anomaly-detector-alert-bundle.zip`
-- `grafana-anomaly-detector-alert-bundle-python39.zip`
+- `grafana-anomaly-exporter-bundle-1.2.1.zip`
 
 Release package notes:
 
 - [`release/README.md`](release/README.md)
-- [`release/GITHUB_RELEASE_NOTES_v1.2.0.md`](release/GITHUB_RELEASE_NOTES_v1.2.0.md)
+- [`release/GITHUB_RELEASE_NOTES_v1.2.1.md`](release/GITHUB_RELEASE_NOTES_v1.2.1.md)
 
 ## 🛠️ Typical alerting path
 
