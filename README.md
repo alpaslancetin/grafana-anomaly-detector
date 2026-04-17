@@ -98,7 +98,6 @@ The exporter turns panel-side anomaly settings into Prometheus metrics that can 
 
 - minimum supported Python: `3.9`
 - recommended Python: `3.9.x`
-- `Python 3.6.8` is not supported
 
 **Release package**
 
