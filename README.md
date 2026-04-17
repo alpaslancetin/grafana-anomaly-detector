@@ -80,6 +80,33 @@ flowchart LR
 5. If needed, the panel syncs rule metadata to the exporter.
 6. The exporter publishes Prometheus metrics such as `grafana_anomaly_rule_score`.
 
+## 🔌 Plugin installation
+
+If you only want the panel plugin, you do not need the exporter bundle.
+
+**Release package**
+
+- [`release/grafana-anomaly-detector-plugin.zip`](release/grafana-anomaly-detector-plugin.zip)
+
+**Typical Grafana install flow**
+
+1. Extract or copy the `alpas-anomalydetector-panel` plugin directory into your Grafana plugins path.
+2. Keep the unsigned plugin allow-list entry:
+   - `allow_loading_unsigned_plugins = alpas-anomalydetector-panel`
+3. Restart Grafana.
+4. Hard refresh the browser after the restart.
+
+**Typical Linux path**
+
+- `/var/lib/grafana/plugins/alpas-anomalydetector-panel`
+
+**Minimal config note**
+
+```ini
+[plugins]
+allow_loading_unsigned_plugins = alpas-anomalydetector-panel
+```
+
 ## 🚨 Score feed exporter
 
 The exporter turns panel-side anomaly settings into Prometheus metrics that can be used in Grafana Alerting or any Prometheus-compatible alerting stack.
@@ -168,33 +195,6 @@ The plugin manifest declares:
 
 - Node.js `22+`
 - npm `10+`
-
-## 🔌 Plugin installation
-
-If you only want the panel plugin, you do not need the exporter bundle.
-
-**Release package**
-
-- [`release/grafana-anomaly-detector-plugin.zip`](release/grafana-anomaly-detector-plugin.zip)
-
-**Typical Grafana install flow**
-
-1. Extract or copy the `alpas-anomalydetector-panel` plugin directory into your Grafana plugins path.
-2. Keep the unsigned plugin allow-list entry:
-   - `allow_loading_unsigned_plugins = alpas-anomalydetector-panel`
-3. Restart Grafana.
-4. Hard refresh the browser after the restart.
-
-**Typical Linux path**
-
-- `/var/lib/grafana/plugins/alpas-anomalydetector-panel`
-
-**Minimal config note**
-
-```ini
-[plugins]
-allow_loading_unsigned_plugins = alpas-anomalydetector-panel
-```
 
 ## 🚀 Quick start
 
