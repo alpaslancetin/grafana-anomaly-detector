@@ -53,15 +53,15 @@
 <table>
   <tr>
     <td width="50%">
-      <img alt="Anomaly inspector and dense incident timeline" src="assets/readme/panel-anomaly-inspector.png">
+      <img alt="Anomaly Detector panel and inspector on a Loki source" src="assets/readme/panel-anomaly-detector.png">
     </td>
     <td width="50%">
-      <img alt="Live multi-panel anomaly dashboard" src="assets/readme/panel-dashboard-overview.png">
+      <img alt="Score feed published to a Loki sink with a target-aware LogQL query" src="assets/readme/panel-score-feed-loki.png">
     </td>
   </tr>
   <tr>
-    <td align="center"><strong>Anomaly inspector &amp; dense incident timeline</strong></td>
-    <td align="center"><strong>Live anomaly dashboard (multi-panel)</strong></td>
+    <td align="center"><strong>Anomaly Detector panel &amp; inspector (Loki source)</strong></td>
+    <td align="center"><strong>Score feed to a Loki sink &amp; LogQL query</strong></td>
   </tr>
 </table>
 
