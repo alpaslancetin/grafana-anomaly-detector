@@ -1,0 +1,25 @@
+# Prometheus source -> exporter Prometheus metrics (/metrics).
+global:
+  prometheus_url: http://127.0.0.1:9090
+  evaluation_interval_seconds: 10
+  request_timeout_seconds: 10
+  listen_host: 0.0.0.0
+  listen_port: 9110
+  config_reload_interval_seconds: 10
+
+rules:
+  - name: service_latency_score
+    description: Edit the PromQL selector and labels before production use.
+    query: http_request_duration_seconds
+    source_type: prometheus
+    range_seconds: 1800
+    step_seconds: 15
+    bucket_span_seconds: 60
+    algorithm: mad
+    threshold: 4.0
+    baseline_window: 12
+    severity_preset: page_first
+    aggregation: max
+    labels:
+      environment: edit-me
+      team: edit-me

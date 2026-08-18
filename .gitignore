@@ -45,3 +45,7 @@ Thumbs.db
 /prometheus-live-demo/anomaly_exporter/state/*.json
 /release/alert-bundle/exporter/state/*.json
 /.compat/
+**/.portable-runtime/
+/output/
+/evidence/
+**/*.corrupt-*.bak

@@ -1,0 +1,2 @@
+# Optional PostgreSQL sink driver. Core exporter runtime stays stdlib + PyYAML.
+psycopg[binary]==3.2.3

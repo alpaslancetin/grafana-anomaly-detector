@@ -1,0 +1,95 @@
+global:
+  prometheus_url: http://prometheus:9090
+  evaluation_interval_seconds: 5
+  request_timeout_seconds: 10
+  listen_host: 0.0.0.0
+  listen_port: 9110
+  config_reload_interval_seconds: 10
+
+sinks:
+  loki:
+    enabled: true
+    url: http://loki:3100
+    labels: { job: grafana_anomaly_exporter, env: multi_sink_demo }
+    batch_max_records: 500
+    timeout_seconds: 5
+
+  influxdb:
+    enabled: true
+    url: http://influxdb:8086
+    version: 2
+    org: anomaly
+    bucket: anomaly
+    token_env: ANOMALY_SINK_INFLUX_TOKEN
+    measurement: grafana_anomaly
+    timeout_seconds: 5
+
+  postgresql:
+    enabled: true
+    dsn_env: ANOMALY_SINK_PG_DSN
+    table: grafana_anomaly_scores
+    auto_create_table: true
+    timeout_seconds: 5
+
+  clickhouse:
+    enabled: true
+    url: http://clickhouse:8123
+    database: default
+    table: grafana_anomaly_scores
+    auto_create_table: true
+    timeout_seconds: 5
+
+  elasticsearch:
+    enabled: true
+    url: http://elasticsearch:9200
+    index_prefix: grafana-anomaly
+    timeout_seconds: 5
+
+rules:
+  - name: checkout_latency
+    description: Alert-ready anomaly score for checkout latency.
+    query: demo_latency_ms{service="checkout",environment="demo"}
+    source_type: prometheus
+    range_seconds: 3600
+    step_seconds: 30
+    bucket_span_seconds: 60
+    algorithm: mad
+    threshold: 4.0
+    baseline_window: 12
+    severity_preset: page_first
+    aggregation: max
+    labels:
+      team: platform
+      category: latency
+
+  - name: checkout_traffic
+    description: Alert-ready anomaly score for checkout request throughput.
+    query: demo_requests_per_second{service="checkout",environment="demo"}
+    source_type: prometheus
+    range_seconds: 3600
+    step_seconds: 30
+    bucket_span_seconds: 60
+    algorithm: ewma
+    threshold: 4.5
+    baseline_window: 14
+    severity_preset: warning_first
+    aggregation: max
+    labels:
+      team: platform
+      category: traffic
+
+  - name: checkout_error_rate
+    description: Alert-ready anomaly score for checkout error percentage.
+    query: demo_error_rate_percent{service="checkout",environment="demo"}
+    source_type: prometheus
+    range_seconds: 3600
+    step_seconds: 30
+    bucket_span_seconds: 60
+    algorithm: mad
+    threshold: 4.2
+    baseline_window: 18
+    severity_preset: page_first
+    aggregation: max
+    labels:
+      team: platform
+      category: error_rate

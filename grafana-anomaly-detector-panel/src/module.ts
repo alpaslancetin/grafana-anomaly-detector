@@ -1,11 +1,16 @@
 import { PanelPlugin } from '@grafana/data';
 import {
+  ANOMALY_THRESHOLD_DEFAULT,
+  ANOMALY_THRESHOLD_MAX,
+  ANOMALY_THRESHOLD_MIN,
+  ANOMALY_THRESHOLD_STEP,
   BucketSpan,
   DetectionAlgorithm,
   DetectionMode,
   MarkerShapeMode,
   MetricPreset,
   ScoreFeedMode,
+  ScoreFeedTarget,
   SeasonalRefinement,
   SetupMode,
   SeverityPreset,
@@ -16,10 +21,11 @@ import {
 import { SimplePanel } from './components/SimplePanel';
 
 const generalCategory = ['Configuration'];
-const feedCategory = ['Prometheus score feed'];
+const feedCategory = ['Anomaly score feed'];
 const analysisCategory = ['Analysis'];
 const advancedCategory = ['Advanced tuning'];
 const displayCategory = ['Display'];
+const visibleSectionsCategory = ['Visible sections'];
 
 const setupModes: Array<{ label: string; value: SetupMode; description: string }> = [
   {
@@ -43,17 +49,50 @@ const scoreFeedModes: Array<{ label: string; value: ScoreFeedMode; description: 
   {
     label: 'Auto sync (Recommended)',
     value: 'auto',
-    description: 'Read the saved dashboard definition and keep Prometheus score rules in sync automatically.',
+    description: 'Continuously publish plugin-computed anomaly scores to the selected score feed target.',
   },
   {
     label: 'Manual sync',
     value: 'manual',
-    description: 'Show a sync button so users can publish alert-ready score rules on demand.',
+    description: 'Show a sync button so users can publish the current plugin-computed score snapshot on demand.',
   },
   {
     label: 'Off',
     value: 'off',
-    description: 'Disable Prometheus score feed for this panel.',
+    description: 'Disable anomaly score feed publishing for this panel.',
+  },
+];
+
+const scoreFeedTargets: Array<{ label: string; value: ScoreFeedTarget; description: string }> = [
+  {
+    label: 'Prometheus metrics',
+    value: 'prometheus',
+    description: 'Expose the plugin-computed anomaly scores from the exporter /metrics endpoint.',
+  },
+  {
+    label: 'Loki',
+    value: 'loki',
+    description: 'Write plugin-computed anomaly scores to the Loki sink.',
+  },
+  {
+    label: 'InfluxDB',
+    value: 'influxdb',
+    description: 'Write plugin-computed anomaly scores to the InfluxDB sink.',
+  },
+  {
+    label: 'PostgreSQL',
+    value: 'postgresql',
+    description: 'Write plugin-computed anomaly scores to the PostgreSQL sink.',
+  },
+  {
+    label: 'ClickHouse',
+    value: 'clickhouse',
+    description: 'Write plugin-computed anomaly scores to the ClickHouse sink.',
+  },
+  {
+    label: 'Elasticsearch',
+    value: 'elasticsearch',
+    description: 'Write plugin-computed anomaly scores to the Elasticsearch sink.',
   },
 ];
 
@@ -284,17 +323,28 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
     .addSelect({
       path: 'scoreFeedMode',
       name: 'Score feed mode',
-      description: 'Turn this panel into alert-ready Prometheus anomaly score metrics without editing Prometheus YAML.',
+      description: 'Publish the anomaly scores detected by this plugin panel to Prometheus metrics or an exporter sink.',
       defaultValue: 'auto',
       settings: {
         options: scoreFeedModes,
       },
       category: feedCategory,
     })
+    .addSelect({
+      path: 'scoreFeedTarget',
+      name: 'Score feed target',
+      description: 'Choose where the plugin-computed anomaly score snapshot is published.',
+      defaultValue: 'prometheus',
+      settings: {
+        options: scoreFeedTargets,
+      },
+      category: feedCategory,
+      showIf: (config) => config.scoreFeedMode !== 'off',
+    })
     .addTextInput({
       path: 'scoreFeedEndpoint',
       name: 'Exporter endpoint',
-      description: 'Browser-side endpoint for the anomaly exporter. The plugin syncs panel rules here and the exporter exposes Prometheus metrics.',
+      description: 'Browser-side endpoint for the anomaly exporter. The plugin posts detected score snapshots here.',
       defaultValue: 'http://127.0.0.1:9110',
       category: feedCategory,
       showIf: (config) => config.scoreFeedMode !== 'off',
@@ -302,7 +352,7 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
     .addTextInput({
       path: 'scoreFeedRuleNamePrefix',
       name: 'Rule name prefix',
-      description: 'Optional short prefix used when generating Prometheus anomaly score rule names for this panel.',
+      description: 'Optional short prefix used when naming the published anomaly score feed for this panel.',
       defaultValue: '',
       category: feedCategory,
       showIf: (config) => config.scoreFeedMode !== 'off',
@@ -328,18 +378,31 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
       category: advancedCategory,
       showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
     })
-    .addNumberInput({
+    .addSliderInput({
       path: 'sensitivity',
       name: 'Anomaly threshold',
-      description: 'Higher values flag fewer anomalies across all algorithms.',
-      defaultValue: 2.8,
+      description:
+        'Move left to catch subtler changes (more alerts), or right to suppress noise (fewer alerts). Balanced 4.0 is the recommended starting point.',
+      defaultValue: ANOMALY_THRESHOLD_DEFAULT,
+      settings: {
+        min: ANOMALY_THRESHOLD_MIN,
+        max: ANOMALY_THRESHOLD_MAX,
+        step: ANOMALY_THRESHOLD_STEP,
+        marks: {
+          [ANOMALY_THRESHOLD_MIN]: 'Sensitive',
+          [ANOMALY_THRESHOLD_DEFAULT]: 'Balanced',
+          [ANOMALY_THRESHOLD_MAX]: 'Strict',
+        },
+        ariaLabelForHandle: 'Anomaly threshold: lower is more sensitive, higher is stricter',
+      },
       category: advancedCategory,
       showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
     })
     .addNumberInput({
       path: 'baselineWindow',
-      name: 'History window',
-      description: 'Lookback for z-score and MAD, smoothing horizon for EWMA, and peer depth for seasonal mode.',
+      name: 'History & warm-up window',
+      description:
+        'Baseline bucket count. Detection waits for this history at the start of a selected range, reducing premature false positives; larger values are steadier but react more slowly.',
       defaultValue: 12,
       category: advancedCategory,
       showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
@@ -394,10 +457,56 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
       category: displayCategory,
     })
     .addBooleanSwitch({
-      path: 'showSummary',
-      name: 'Show anomaly summary',
+      path: 'showInitialLabels',
+      name: 'Initial labels',
+      description: 'Show the panel title, algorithm, bucket, selected series, and datasource context.',
       defaultValue: true,
-      category: displayCategory,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showStatistics',
+      name: 'Statistics',
+      description: 'Show severity, confidence, anomaly count, and data quality cards.',
+      defaultValue: true,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showAnomalyFeed',
+      name: 'Anomaly feed',
+      description: 'Show the incident overview ribbon, timeline, and incident list.',
+      defaultValue: true,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showMainChart',
+      name: 'Main chart',
+      defaultValue: true,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showSeriesSummary',
+      name: 'Series summary',
+      defaultValue: true,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showInspector',
+      name: 'Anomaly inspector',
+      defaultValue: true,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showScoreFeed',
+      name: 'Score feed status',
+      description: 'Show the selected score target and its synchronization status. Publishing remains controlled by Score feed mode.',
+      defaultValue: true,
+      category: visibleSectionsCategory,
+    })
+    .addBooleanSwitch({
+      path: 'showDetectionProfile',
+      name: 'Detection profile',
+      defaultValue: true,
+      category: visibleSectionsCategory,
     })
     .addBooleanSwitch({
       path: 'showInlineSeriesLabels',
@@ -410,7 +519,7 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
       path: 'showFocusBand',
       name: 'Show anomaly focus band',
       description: 'Render a zoomed local band around the selected anomaly for faster incident review.',
-      defaultValue: true,
+      defaultValue: false,
       category: displayCategory,
     })
     .addSelect({
@@ -446,8 +555,7 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
     .addBooleanSwitch({
       path: 'showExports',
       name: 'Show export blocks',
-      defaultValue: true,
-      category: displayCategory,
-      showIf: (config) => config.showSummary !== false,
+      defaultValue: false,
+      category: visibleSectionsCategory,
     });
 });

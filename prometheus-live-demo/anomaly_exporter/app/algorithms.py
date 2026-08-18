@@ -7,12 +7,14 @@ from statistics import median
 from .models import (
     MIN_BASELINE_POINTS,
     MIN_SEASONAL_SAMPLES,
+    MAX_RAW_SCORE,
     RuleConfig,
     SampleHistoryEntry,
     SeriesSnapshot,
     SeriesState,
     SeverityState,
     SEVERITY_THRESHOLDS,
+    warmup_history_points,
 )
 
 
@@ -39,6 +41,10 @@ def _safe_spread(spread: float, reference: float) -> float:
     if math.isfinite(spread) and spread > 1e-9:
         return spread
     return max(abs(reference) * 0.02, 1e-6)
+
+
+def _bound_raw_score(score: float) -> float:
+    return max(0.0, min(MAX_RAW_SCORE, score)) if math.isfinite(score) else 0.0
 
 
 def _window_score(history_values: list[float], current_value: float, expected: float, spread: float, baseline_window: int) -> float:
@@ -73,7 +79,7 @@ def _confidence_state(
     score = ratio / 2.5 * 100
     if window_raw_score > point_raw_score:
         score += 8
-    if sample_count >= max(5, sample_count // 2):
+    if sample_count >= 8:
         score += 4
     if data_quality_label == 'thin':
         score -= 18
@@ -174,8 +180,15 @@ def _seasonal_expected_and_spread(peers: list[float], recent_history: list[float
     return expected + trend, _safe_spread(spread, expected + trend)
 
 
+def _level_shift_reference_values(values: list[float], start: int, baseline_end: int, window: int) -> list[float]:
+    anchor_end = min(start + window, baseline_end)
+    if anchor_end - start >= MIN_BASELINE_POINTS:
+        return values[start:anchor_end]
+    return values[max(start, baseline_end - window) : baseline_end]
+
+
 def _empty_snapshot(rule: RuleConfig, source_metric: str, labels: dict[str, str], value: float, timestamp: float) -> SeriesSnapshot:
-    severity = _severity_state(0.0, rule.threshold, rule.severity_preset)
+    severity = _severity_state(0.0, rule.threshold, rule.severity_preset, data_quality_label='thin')
     return SeriesSnapshot(
         rule_name=rule.name,
         source_metric=source_metric,
@@ -236,9 +249,9 @@ def _snapshot(
         lower=expected - rule.threshold * spread,
         upper=expected + rule.threshold * spread,
         deviation=value - expected,
-        raw_score=severity.raw_score,
-        point_raw_score=point_raw_score,
-        window_raw_score=window_raw_score,
+        raw_score=_bound_raw_score(severity.raw_score),
+        point_raw_score=_bound_raw_score(point_raw_score),
+        window_raw_score=_bound_raw_score(window_raw_score),
         score_driver=score_driver,
         normalized_score=severity.normalized_score,
         severity_label=severity.severity_label,
@@ -263,21 +276,30 @@ def _snapshot_level_shift(
 ) -> SeriesSnapshot:
     data_quality_label = _data_quality_state(history_values, rule.baseline_window)
     shift_window = min(max(3, rule.baseline_window // 3), 12)
-    baseline_history = history_values[-rule.baseline_window :]
-    if len(baseline_history) <= shift_window:
+    recent_window = max(1, shift_window - 1)
+    lookback_window = max(rule.baseline_window * 6, rule.baseline_window + shift_window)
+    start = max(0, len(history_values) - lookback_window)
+    if len(history_values) - start < max(MIN_BASELINE_POINTS * 2, shift_window + MIN_BASELINE_POINTS):
         return _empty_snapshot(rule, source_metric, labels, value, timestamp)
 
-    baseline_only = baseline_history[: -max(1, shift_window - 1)]
-    if len(baseline_only) < MIN_BASELINE_POINTS:
+    baseline_end = len(history_values) - recent_window
+    if baseline_end - start < MIN_BASELINE_POINTS:
         return _empty_snapshot(rule, source_metric, labels, value, timestamp)
 
-    expected = median(baseline_only)
-    spread = max(_safe_spread(_mad(baseline_only, expected), expected), _safe_spread(_stddev(baseline_only, expected), expected))
+    reference_history = _level_shift_reference_values(history_values, start, baseline_end, rule.baseline_window)
+    expected = _mean(reference_history)
+    spread = _safe_spread(_stddev(reference_history, expected), expected)
     point_raw_score = abs(value - expected) / spread
-    recent = history_values[-(shift_window - 1) :] + [value]
-    recent_center = median(recent)
-    persistent_buckets = sum(1 for item in recent if abs(item - expected) > spread)
-    persistence_ratio = persistent_buckets / len(recent)
+    recent_values = history_values[-recent_window:]
+    recent_sum = value
+    persistent_buckets = 1 if abs(value - expected) > spread else 0
+    for item in recent_values:
+        recent_sum += item
+        if abs(item - expected) > spread:
+            persistent_buckets += 1
+    recent_count = len(recent_values) + 1
+    recent_center = recent_sum / recent_count
+    persistence_ratio = persistent_buckets / recent_count
     window_raw_score = abs(recent_center - expected) / spread * (1.0 + max(0.0, persistence_ratio - 0.4))
     raw_score = max(point_raw_score * 0.85, window_raw_score)
     score_driver = 'window' if window_raw_score >= point_raw_score * 0.85 else 'point'
@@ -287,7 +309,7 @@ def _snapshot_level_shift(
         rule.severity_preset,
         point_raw_score=point_raw_score,
         window_raw_score=window_raw_score,
-        sample_count=len(recent),
+        sample_count=len(reference_history) + 1,
         data_quality_label=data_quality_label,
     )
     return SeriesSnapshot(
@@ -299,9 +321,9 @@ def _snapshot_level_shift(
         lower=expected - rule.threshold * spread,
         upper=expected + rule.threshold * spread,
         deviation=value - expected,
-        raw_score=severity.raw_score,
-        point_raw_score=point_raw_score,
-        window_raw_score=window_raw_score,
+        raw_score=_bound_raw_score(severity.raw_score),
+        point_raw_score=_bound_raw_score(point_raw_score),
+        window_raw_score=_bound_raw_score(window_raw_score),
         score_driver=score_driver,
         normalized_score=severity.normalized_score,
         severity_label=severity.severity_label,
@@ -318,10 +340,11 @@ def _snapshot_level_shift(
 
 def evaluate_series(state: SeriesState, rule: RuleConfig, source_metric: str, labels: dict[str, str], value: float, timestamp: float) -> SeriesSnapshot:
     history_values = [entry.value for entry in state.history]
+    minimum_history = warmup_history_points(rule.baseline_window)
 
     if rule.algorithm == 'zscore':
         history_slice = history_values[-rule.baseline_window:]
-        if len(history_slice) < MIN_BASELINE_POINTS:
+        if len(history_slice) < minimum_history:
             result = _empty_snapshot(rule, source_metric, labels, value, timestamp)
         else:
             expected = _mean(history_slice)
@@ -330,7 +353,7 @@ def evaluate_series(state: SeriesState, rule: RuleConfig, source_metric: str, la
 
     elif rule.algorithm == 'mad':
         history_slice = history_values[-rule.baseline_window:]
-        if len(history_slice) < MIN_BASELINE_POINTS:
+        if len(history_slice) < minimum_history:
             result = _empty_snapshot(rule, source_metric, labels, value, timestamp)
         else:
             expected = median(history_slice)
@@ -349,24 +372,29 @@ def evaluate_series(state: SeriesState, rule: RuleConfig, source_metric: str, la
                 spread = _safe_spread(median(residual_slice), expected)
             else:
                 spread = _safe_spread(_stddev(history_values[-rule.baseline_window:]), expected)
-            result = _snapshot(
-                rule,
-                source_metric,
-                labels,
-                history_values,
-                value,
-                expected,
-                spread,
-                timestamp,
-                include_window_score=True,
-            )
             state.residuals.append(abs(value - expected))
             alpha = 2 / (max(rule.baseline_window, 2) + 1)
             state.ewma_baseline = alpha * value + (1 - alpha) * expected
+            if len(history_values) < minimum_history:
+                result = _empty_snapshot(rule, source_metric, labels, value, timestamp)
+            else:
+                result = _snapshot(
+                    rule,
+                    source_metric,
+                    labels,
+                    history_values,
+                    value,
+                    expected,
+                    spread,
+                    timestamp,
+                    include_window_score=True,
+                )
 
     elif rule.algorithm == 'level_shift':
-        history_slice = history_values[-rule.baseline_window :]
-        if len(history_slice) < max(MIN_BASELINE_POINTS * 2, 6):
+        shift_window = min(max(3, rule.baseline_window // 3), 12)
+        lookback_window = max(rule.baseline_window * 6, rule.baseline_window + shift_window)
+        history_slice = history_values[-lookback_window:]
+        if len(history_slice) < max(minimum_history, MIN_BASELINE_POINTS * 2, shift_window + MIN_BASELINE_POINTS):
             result = _empty_snapshot(rule, source_metric, labels, value, timestamp)
         else:
             result = _snapshot_level_shift(rule, source_metric, labels, history_values, value, timestamp)

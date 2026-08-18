@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import sys
-from typing import DefaultDict, Deque, Dict
+from typing import Any, DefaultDict, Deque, Dict
 SeverityThresholds = Dict[str, int]
 
 SEVERITY_THRESHOLDS: dict[str, SeverityThresholds] = {
@@ -18,7 +18,12 @@ SUPPORTED_SEVERITY_PRESETS = set(SEVERITY_THRESHOLDS.keys())
 SUPPORTED_AGGREGATIONS = {'max', 'top3_avg'}
 MIN_BASELINE_POINTS = 3
 MIN_SEASONAL_SAMPLES = 3
+MAX_RAW_SCORE = 100.0
 DATACLASS_KWARGS = {'slots': True} if sys.version_info >= (3, 10) else {}
+
+
+def warmup_history_points(baseline_window: int) -> int:
+    return max(MIN_BASELINE_POINTS, int(baseline_window))
 
 
 @dataclass(**DATACLASS_KWARGS)
@@ -35,13 +40,20 @@ class GlobalConfig:
 class RuleConfig:
     name: str
     query: str
+    source_type: str = 'prometheus'
+    datasource_url: str = ''
+    target_sinks: list[str] | None = None
+    range_seconds: int = 0
+    step_seconds: int = 0
+    bucket_span_seconds: int = 0
     algorithm: str = 'mad'
-    threshold: float = 2.8
+    threshold: float = 4.0
     baseline_window: int = 12
     seasonality_samples: int = 24
     seasonal_refinement: str = 'cycle'
     severity_preset: str = 'balanced'
     aggregation: str = 'max'
+    legend: str = ''
     labels: dict[str, str] = field(default_factory=dict)
     description: str = ''
 
@@ -52,9 +64,18 @@ class RuleConfig:
 
 
 @dataclass(**DATACLASS_KWARGS)
+class SinkDefinition:
+    name: str
+    enabled: bool = False
+    settings: dict[str, Any] = field(default_factory=dict)
+    error: str = ''
+
+
+@dataclass(**DATACLASS_KWARGS)
 class AppConfig:
     global_config: GlobalConfig
     rules: list[RuleConfig]
+    sinks: dict[str, SinkDefinition] = field(default_factory=dict)
 
 
 @dataclass(**DATACLASS_KWARGS)
@@ -62,6 +83,12 @@ class PrometheusSample:
     labels: dict[str, str]
     value: float
     timestamp: float
+
+
+@dataclass(**DATACLASS_KWARGS)
+class PrometheusRangeSeries:
+    labels: dict[str, str]
+    samples: list[PrometheusSample]
 
 
 @dataclass(**DATACLASS_KWARGS)

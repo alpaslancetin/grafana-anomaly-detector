@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 import time
@@ -8,13 +9,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import RuleConfig
+from .models import (
+    RuleConfig,
+    SUPPORTED_ALGORITHMS,
+    SUPPORTED_SEASONAL_REFINEMENTS,
+    SUPPORTED_SEVERITY_PRESETS,
+)
 
 DATACLASS_KWARGS = {'slots': True} if sys.version_info >= (3, 10) else {}
 
 @dataclass(**DATACLASS_KWARGS)
 class DynamicRuleRecord:
     rule: RuleConfig
+    target: str
     dashboard_uid: str
     dashboard_title: str
     panel_id: int
@@ -47,18 +54,26 @@ class DynamicRuleRegistry:
             rule = RuleConfig(
                 name=rule_data['name'],
                 query=rule_data['query'],
+                source_type=rule_data.get('source_type', rule_data.get('datasource_type', 'prometheus')),
+                datasource_url=rule_data.get('datasource_url', ''),
+                target_sinks=rule_data.get('target_sinks'),
+                range_seconds=int(rule_data.get('range_seconds', 0)),
+                step_seconds=int(rule_data.get('step_seconds', 0)),
+                bucket_span_seconds=int(rule_data.get('bucket_span_seconds', 0)),
                 algorithm=rule_data.get('algorithm', 'mad'),
-                threshold=float(rule_data.get('threshold', 2.8)),
+                threshold=float(rule_data.get('threshold', 4.0)),
                 baseline_window=int(rule_data.get('baseline_window', 12)),
                 seasonality_samples=int(rule_data.get('seasonality_samples', 24)),
                 seasonal_refinement=rule_data.get('seasonal_refinement', 'cycle'),
                 severity_preset=rule_data.get('severity_preset', 'balanced'),
                 aggregation=rule_data.get('aggregation', 'max'),
+                legend=str(rule_data.get('legend', rule_data.get('legend_format', ''))),
                 labels={str(k): str(v) for k, v in (rule_data.get('labels', {}) or {}).items()},
                 description=str(rule_data.get('description', '')),
             )
             loaded[rule.name] = DynamicRuleRecord(
                 rule=rule,
+                target=str(item.get('target') or rule_data.get('labels', {}).get('feed_target') or 'prometheus').strip().lower(),
                 dashboard_uid=str(item['dashboard_uid']),
                 dashboard_title=str(item.get('dashboard_title', '')),
                 panel_id=int(item['panel_id']),
@@ -101,7 +116,7 @@ class DynamicRuleRegistry:
         if panel_id_raw is None:
             raise RegistrationError('panelId is required.')
         if not isinstance(targets, list) or not targets:
-            raise RegistrationError('At least one Prometheus target is required.')
+            raise RegistrationError('At least one datasource target is required.')
 
         try:
             panel_id = int(panel_id_raw)
@@ -109,18 +124,38 @@ class DynamicRuleRegistry:
             raise RegistrationError('panelId must be an integer.') from exc
 
         algorithm = str(resolved.get('algorithm', 'mad')).lower()
-        threshold = float(resolved.get('sensitivity', 2.8))
-        baseline_window = int(resolved.get('baselineWindow', 12))
-        seasonality_samples = int(resolved.get('seasonalitySamples', 24))
+        try:
+            threshold = float(resolved.get('sensitivity', 4.0))
+            baseline_window = int(resolved.get('baselineWindow', 12))
+            seasonality_samples = int(resolved.get('seasonalitySamples', 24))
+        except (TypeError, ValueError) as exc:
+            raise RegistrationError('Resolved anomaly options contain invalid numeric values.') from exc
         seasonal_refinement = str(resolved.get('seasonalRefinement', 'cycle')).lower()
         severity_preset = str(resolved.get('severityPreset', 'balanced')).lower()
         detection_mode = str(resolved.get('detectionMode', 'single')).lower()
+
+        if algorithm not in SUPPORTED_ALGORITHMS:
+            raise RegistrationError(f'algorithm must be one of: {sorted(SUPPORTED_ALGORITHMS)}')
+        if not math.isfinite(threshold) or threshold <= 0:
+            raise RegistrationError('sensitivity must be a finite positive number.')
+        if baseline_window <= 0:
+            raise RegistrationError('baselineWindow must be positive.')
+        if seasonality_samples <= 0:
+            raise RegistrationError('seasonalitySamples must be positive.')
+        if seasonal_refinement not in SUPPORTED_SEASONAL_REFINEMENTS:
+            raise RegistrationError(f'seasonalRefinement must be one of: {sorted(SUPPORTED_SEASONAL_REFINEMENTS)}')
+        if severity_preset not in SUPPORTED_SEVERITY_PRESETS:
+            raise RegistrationError(f'severityPreset must be one of: {sorted(SUPPORTED_SEVERITY_PRESETS)}')
+        if detection_mode not in {'single', 'multi'}:
+            raise RegistrationError('detectionMode must be single or multi.')
         aggregation = 'top3_avg' if detection_mode == 'multi' else 'max'
 
         dashboard_title = str(payload.get('dashboardTitle', '')).strip()
         panel_title = str(payload.get('panelTitle', '')).strip()
         requested_prefix = str(payload.get('ruleNamePrefix', '')).strip()
         sync_hash = str(payload.get('syncHash', '')).strip()
+        feed_target = self._normalize_target(payload.get('target') or payload.get('scoreFeedTarget') or 'prometheus')
+        target_sinks = [] if feed_target == 'prometheus' else [feed_target]
         now = time.time()
 
         scope_keys = [name for name, record in self.records.items() if record.dashboard_uid == dashboard_uid and record.panel_id == panel_id]
@@ -146,6 +181,7 @@ class DynamicRuleRegistry:
                 'panel_title': panel_title or f'Panel {panel_id}',
                 'query_ref_id': ref_id,
                 'feed_source': 'grafana_panel',
+                'feed_target': feed_target,
                 'detection_mode': detection_mode,
                 'metric_preset': str(resolved.get('effectiveMetricPreset') or resolved.get('metricPreset') or 'custom'),
             }
@@ -159,6 +195,12 @@ class DynamicRuleRegistry:
             rule = RuleConfig(
                 name=rule_name,
                 query=str(target.get('expr')).strip(),
+                source_type=datasource_type or 'prometheus',
+                datasource_url=str(target.get('datasourceUrl', '')).strip(),
+                target_sinks=target_sinks,
+                range_seconds=int(resolved.get('rangeSeconds', 0) or 0),
+                step_seconds=int(resolved.get('stepSeconds', 0) or 0),
+                bucket_span_seconds=int(resolved.get('bucketSpanSeconds', 0) or 0),
                 algorithm=algorithm,
                 threshold=threshold,
                 baseline_window=baseline_window,
@@ -166,11 +208,13 @@ class DynamicRuleRegistry:
                 seasonal_refinement=seasonal_refinement,
                 severity_preset=severity_preset,
                 aggregation=aggregation,
+                legend=str(target.get('legend', '')).strip(),
                 labels=labels,
                 description=f'Grafana panel sync for {panel_title or dashboard_uid} [{ref_id}]',
             )
             record = DynamicRuleRecord(
                 rule=rule,
+                target=feed_target,
                 dashboard_uid=dashboard_uid,
                 dashboard_title=dashboard_title,
                 panel_id=panel_id,
@@ -184,13 +228,14 @@ class DynamicRuleRegistry:
             registered.append(
                 {
                     'rule': rule.name,
+                    'target': feed_target,
                     'query': f'grafana_anomaly_rule_score{{rule="{rule.name}"}}',
                     'perSeriesQuery': f'grafana_anomaly_score{{rule="{rule.name}"}}',
                 }
             )
 
         self.save()
-        return {'registered': registered, 'removed': removed}
+        return {'registered': registered, 'removed': removed, 'target': feed_target}
 
     def save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -204,6 +249,7 @@ class DynamicRuleRegistry:
     def _record_to_dict(self, record: DynamicRuleRecord) -> dict[str, Any]:
         return {
             'dashboard_uid': record.dashboard_uid,
+            'target': record.target,
             'dashboard_title': record.dashboard_title,
             'panel_id': record.panel_id,
             'panel_title': record.panel_title,
@@ -214,6 +260,12 @@ class DynamicRuleRegistry:
             'rule': {
                 'name': record.rule.name,
                 'query': record.rule.query,
+                'source_type': record.rule.source_type,
+                'datasource_url': record.rule.datasource_url,
+                'target_sinks': record.rule.target_sinks,
+                'range_seconds': record.rule.range_seconds,
+                'step_seconds': record.rule.step_seconds,
+                'bucket_span_seconds': record.rule.bucket_span_seconds,
                 'algorithm': record.rule.algorithm,
                 'threshold': record.rule.threshold,
                 'baseline_window': record.rule.baseline_window,
@@ -221,6 +273,7 @@ class DynamicRuleRegistry:
                 'seasonal_refinement': record.rule.seasonal_refinement,
                 'severity_preset': record.rule.severity_preset,
                 'aggregation': record.rule.aggregation,
+                'legend': record.rule.legend,
                 'labels': record.rule.labels,
                 'description': record.rule.description,
             },
@@ -229,3 +282,17 @@ class DynamicRuleRegistry:
     def _sanitize_rule_name(self, value: str) -> str:
         sanitized = re.sub(r'[^a-zA-Z0-9_]+', '_', value).strip('_').lower()
         return sanitized[:120] if sanitized else f'panel_rule_{int(time.time())}'
+
+    def _normalize_target(self, value: object) -> str:
+        target = str(value or 'prometheus').strip().lower()
+        aliases = {
+            'elastic': 'elasticsearch',
+            'es': 'elasticsearch',
+            'influx': 'influxdb',
+            'pg': 'postgresql',
+            'postgres': 'postgresql',
+        }
+        target = aliases.get(target, target)
+        if target not in {'prometheus', 'loki', 'influxdb', 'postgresql', 'clickhouse', 'elasticsearch'}:
+            raise RegistrationError(f'Unsupported score feed target: {target}')
+        return target

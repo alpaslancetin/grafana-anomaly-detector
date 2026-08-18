@@ -1,6 +1,6 @@
 {
   "name": "anomaly-detector",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
     "dev": "webpack -w -c ./.config/webpack/webpack.config.ts --env development",
@@ -77,4 +77,3 @@
   },
   "packageManager": "npm@10.9.4"
 }
-
