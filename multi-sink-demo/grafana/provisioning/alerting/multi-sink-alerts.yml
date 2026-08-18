@@ -1,0 +1,387 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Anomaly Multi Sink Alert Examples
+    folder: Multi Sink Demo
+    interval: 1m
+    rules:
+      - uid: ms-prom-score
+        title: "[Demo] Prometheus anomaly score > 90"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: demo-prometheus
+              editorMode: code
+              expr: 'max(grafana_anomaly_rule_score{rule=~"checkout_latency|checkout_traffic|checkout_error_rate"})'
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: true
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: Example alert over the original Prometheus exporter metrics.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: prometheus
+
+      - uid: ms-loki-score
+        title: "[Demo] Loki anomaly score > 90"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-loki
+            model:
+              datasource:
+                type: loki
+                uid: demo-loki
+              expr: 'max_over_time({job="grafana_anomaly_exporter",record_type="rule",rule=~"checkout_latency|checkout_traffic|checkout_error_rate"} | json normalized_score="normalized_score" | unwrap normalized_score [5m])'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: range
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: Example alert over anomaly scores written to Loki.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: loki
+
+      - uid: ms-influx-score
+        title: "[Demo] InfluxDB anomaly score > 90"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-influxdb
+            model:
+              datasource:
+                type: influxdb
+                uid: demo-influxdb
+              query: 'from(bucket: "anomaly") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "grafana_anomaly" and r._field == "score" and r.record_type == "rule" and contains(value: r.rule, set: ["checkout_latency", "checkout_traffic", "checkout_error_rate"])) |> aggregateWindow(every: 1m, fn: max, createEmpty: false) |> yield(name: "score")'
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: Example alert over anomaly scores written to InfluxDB.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: influxdb
+
+      - uid: ms-postgres-score
+        title: "[Demo] PostgreSQL anomaly score > 90"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-postgresql
+            model:
+              datasource:
+                type: postgres
+                uid: demo-postgresql
+              editorMode: code
+              format: time_series
+              rawQuery: true
+              rawSql: "SELECT $__timeGroup(ts, '1m') AS time, max(score) AS score FROM grafana_anomaly_scores WHERE $__timeFilter(ts) AND record_type = 'rule' AND rule IN ('checkout_latency', 'checkout_traffic', 'checkout_error_rate') GROUP BY 1 ORDER BY 1"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: Example alert over anomaly scores written to PostgreSQL.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: postgresql
+
+      - uid: ms-clickhouse-score
+        title: "[Demo] ClickHouse anomaly score > 90"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-clickhouse
+            model:
+              datasource:
+                type: grafana-clickhouse-datasource
+                uid: demo-clickhouse
+              editorMode: sql
+              rawSql: "SELECT toStartOfMinute(ts) AS time, max(score) AS score FROM default.grafana_anomaly_scores WHERE $__timeFilter(ts) AND record_type = 'rule' AND rule IN ('checkout_latency', 'checkout_traffic', 'checkout_error_rate') GROUP BY time ORDER BY time"
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: Example alert over anomaly scores written to ClickHouse.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: clickhouse
+
+      - uid: ms-elastic-score
+        title: "[Demo] Elasticsearch anomaly score > 90"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-elasticsearch
+            model:
+              alias: max normalized_score
+              bucketAggs:
+                - field: "@timestamp"
+                  id: "2"
+                  settings:
+                    interval: 1m
+                  type: date_histogram
+              datasource:
+                type: elasticsearch
+                uid: demo-elasticsearch
+              metrics:
+                - field: normalized_score
+                  id: "1"
+                  type: max
+              query: 'record_type:rule AND rule:(checkout_latency OR checkout_traffic OR checkout_error_rate)'
+              refId: A
+              timeField: "@timestamp"
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 90
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: Example alert over anomaly scores written to Elasticsearch.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: elasticsearch
+
+      - uid: ms-sink-watchdog
+        title: "[Demo] Anomaly exporter sink heartbeat watchdog"
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: demo-prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: demo-prometheus
+              editorMode: code
+              expr: min(grafana_anomaly_sink_up)
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: true
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Alerts when any anomaly exporter sink reports down or the sink heartbeat metric disappears.
+        labels:
+          alert_family: anomaly_multi_sink_demo
+          datasource: exporter
+          severity: major

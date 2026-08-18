@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { dateTimeFormat, FieldType, PanelProps, timeZoneAbbrevation, TimeZone } from '@grafana/data';
 import { css } from '@emotion/css';
 import { useTheme2 } from '@grafana/ui';
@@ -10,6 +10,7 @@ import {
   MarkerShapeMode,
   MetricPreset,
   ScoreFeedMode,
+  ScoreFeedTarget,
   SeasonalRefinement,
   SetupMode,
   SeverityPreset,
@@ -17,6 +18,7 @@ import {
   TimeAxisDensity,
   TimeAxisPlacement,
 } from '../types';
+import { analyzePoints as analyzeCanonicalPoints, resolveValueDomain } from '../scoring';
 
 interface Props extends PanelProps<SimpleOptions> {}
 
@@ -266,11 +268,40 @@ interface HoverSnapshot extends SeverityState {
   anomalyCount: number;
 }
 
+interface ChartFrame {
+  width: number;
+  height: number;
+}
+
 interface PreparedSeries {
   key: string;
   label: string;
+  preservesGrafanaDisplayName: boolean;
   color: string;
   rawPoints: RawPoint[];
+}
+
+interface SeriesDisplayNameField {
+  name?: string;
+  config?: {
+    displayNameFromDS?: string;
+    displayName?: string;
+  };
+  state?: {
+    displayName?: string | null;
+  } | null;
+}
+
+interface SectionVisibility {
+  initialLabels: boolean;
+  statistics: boolean;
+  mainChart: boolean;
+  inspector: boolean;
+  anomalyFeed: boolean;
+  seriesSummary: boolean;
+  scoreFeed: boolean;
+  detectionProfile: boolean;
+  exports: boolean;
 }
 
 interface AnalysisBuildResult {
@@ -284,6 +315,7 @@ interface FeedQueryTarget {
   legend: string;
   datasourceUid: string;
   datasourceType: string;
+  datasourceUrl?: string;
 }
 
 type FeedSource = 'saved' | 'live';
@@ -292,14 +324,29 @@ type ScoreFeedStatusKind = 'off' | 'idle' | 'syncing' | 'synced' | 'error' | 'un
 interface PanelSyncContext {
   source: FeedSource;
   dashboardUid: string;
+  folderTitle?: string;
   dashboardTitle: string;
   panelTitle: string;
   targets: FeedQueryTarget[];
   panelOptions: Partial<SimpleOptions>;
+  rangeSeconds?: number;
+  stepSeconds?: number;
 }
 
 interface ScoreFeedRule {
   rule: string;
+  query: string;
+  perSeriesQuery: string;
+  target?: ScoreFeedTarget | string;
+  queryLanguage?: string;
+  datasourceType?: string;
+  queryVariants?: ScoreFeedQueryVariant[];
+}
+
+interface ScoreFeedQueryVariant {
+  target: ScoreFeedTarget | string;
+  queryLanguage: string;
+  datasourceType: string;
   query: string;
   perSeriesQuery: string;
 }
@@ -319,17 +366,111 @@ interface ScoreFeedHookInput {
   panelTitle: string;
   options: SimpleOptions;
   resolvedOptions: ResolvedOptions;
-  metricNames: string[];
   liveTargets: FeedQueryTarget[];
+  analyses: SeriesAnalysis[];
+  timeRangeSeconds: number;
+  queryStepSeconds: number;
 }
 
 interface ScoreFeedController extends ScoreFeedState {
   syncNow: () => Promise<void>;
 }
 
+interface ComputedScoreFeedSeriesPayload {
+  key: string;
+  label: string;
+  timestamp: number;
+  value: number;
+  expected: number | null;
+  lower: number | null;
+  upper: number | null;
+  deviation: number | null;
+  rawScore: number;
+  pointRawScore: number;
+  windowRawScore: number;
+  scoreDriver: 'point' | 'window';
+  normalizedScore: number;
+  severityLabel: SeverityLabel;
+  isAnomaly: boolean;
+  confidenceScore: number;
+  confidenceLabel: ConfidenceLabel;
+  dataQualityLabel: DataQualityLabel;
+  threshold: number;
+}
+
+interface ComputedScoreFeedPayload {
+  dashboardUid: string;
+  folderTitle?: string;
+  dashboardTitle: string;
+  panelId: number;
+  panelTitle: string;
+  ruleName: string;
+  target: ScoreFeedTarget;
+  source: FeedSource;
+  sourceDatasources: Array<{ uid: string; type: string }>;
+  series: ComputedScoreFeedSeriesPayload[];
+  rule: {
+    timestamp: number;
+    score: number;
+    rawScore: number;
+    breachCount: number;
+    seriesCount: number;
+    activeSeries: number;
+    severityLabel: SeverityLabel;
+  };
+  resolvedOptions: {
+    algorithm: DetectionAlgorithm;
+    severityPreset: SeverityPreset;
+    sensitivity: number;
+  };
+}
+
+interface PanelScoreFeedRegistrationPayload {
+  dashboardUid: string;
+  folderTitle?: string;
+  dashboardTitle: string;
+  panelId: number;
+  panelTitle: string;
+  ruleNamePrefix: string;
+  target: ScoreFeedTarget;
+  source: FeedSource;
+  syncHash: string;
+  targets: FeedQueryTarget[];
+  resolvedOptions: {
+    setupMode: SetupMode;
+    metricPreset: MetricPreset;
+    effectiveMetricPreset: EffectiveMetricPreset | 'custom';
+    detectionMode: DetectionMode;
+    algorithm: DetectionAlgorithm;
+    sensitivity: number;
+    baselineWindow: number;
+    seasonalitySamples: number;
+    seasonalRefinement: SeasonalRefinement;
+    severityPreset: SeverityPreset;
+    rangeSeconds: number;
+    stepSeconds: number;
+    bucketSpanSeconds: number;
+  };
+}
+
 interface ActionToast {
   tone: 'success' | 'error';
   message: string;
+}
+
+interface AlertRuleDraftContext {
+  dashboardUid: string;
+  folderTitle?: string;
+  dashboardTitle: string;
+  panelId: number;
+  panelTitle: string;
+  ruleName: string;
+  queryLanguage: string;
+  alertQuery: string;
+  threshold: number;
+  target: ScoreFeedTarget | string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
 }
 
 interface GrafanaAnnotationPayload {
@@ -343,8 +484,6 @@ interface GrafanaAnnotationPayload {
   text: string;
 }
 const SERIES_COLORS = ['#7EB26D', '#EAB839', '#6ED0E0', '#EF843C', '#E24D42', '#1F78C1'];
-const MIN_BASELINE_POINTS = 3;
-const MIN_SEASONAL_SAMPLES = 3;
 const MAX_RENDER_POINTS = 720;
 const AUTO_TARGET_POINTS = 640;
 const PADDING = { top: 18, right: 20, bottom: 42, left: 64 };
@@ -361,11 +500,6 @@ const EXPLICIT_BUCKET_SPANS = Object.values(BUCKET_SPAN_MS).sort((left, right) =
 const SETUP_MODE_LABELS: Record<SetupMode, string> = {
   recommended: 'Recommended',
   advanced: 'Advanced',
-};
-
-const MODE_LABELS: Record<DetectionMode, string> = {
-  single: 'Single metric',
-  multi: 'Multi metric',
 };
 
 const ALGORITHM_LABELS: Record<DetectionAlgorithm, string> = {
@@ -449,7 +583,7 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   level_shift: {
     algorithm: 'level_shift',
-    sensitivity: 3.2,
+    sensitivity: 6.0,
     baselineWindow: 30,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
@@ -499,12 +633,6 @@ const SEVERITY_PRESET_LABELS: Record<SeverityPreset, string> = {
   page_first: 'Page first',
 };
 
-const SEVERITY_THRESHOLDS: Record<SeverityPreset, { low: number; medium: number; high: number; critical: number }> = {
-  warning_first: { low: 35, medium: 55, high: 72, critical: 88 },
-  balanced: { low: 40, medium: 60, high: 75, critical: 90 },
-  page_first: { low: 45, medium: 65, high: 82, critical: 95 },
-};
-
 const SEVERITY_LABELS: Record<SeverityLabel, string> = {
   normal: 'Normal',
   low: 'Low',
@@ -533,6 +661,9 @@ const CONFIDENCE_COLORS: Record<ConfidenceLabel, string> = {
   high: '#16A34A',
 };
 
+const INLINE_SERIES_LABEL_LIMIT = 4;
+const LEGEND_ROW_LIMIT = 8;
+
 const DATA_QUALITY_LABELS: Record<DataQualityLabel, string> = {
   healthy: 'Healthy data',
   thin: 'Thin history',
@@ -544,15 +675,51 @@ const getStyles = (isDark: boolean) => ({
   wrapper: css`
     width: 100%;
     height: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 12px;
+    min-height: 0;
+    container-type: inline-size;
+    padding: 10px;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow: auto;
     font-family: 'Segoe UI', sans-serif;
     color: ${isDark ? '#F3F4F6' : '#111827'};
-    background: ${isDark ? '#0F172A' : '#FBFDFF'};
+    background: ${isDark ? 'radial-gradient(circle at 8% 0%, rgba(220,38,38,0.12), transparent 26%), linear-gradient(180deg, #060A12 0%, #0B111C 100%)' : 'linear-gradient(180deg, #F8FAFC 0%, #EEF4FF 100%)'};
+  `,
+  operationalCanvas: css`
+    width: 100%;
+    min-height: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    gap: 12px;
+    align-items: stretch;
+    @media (max-width: 1100px) {
+      grid-template-columns: 1fr;
+    }
+    @container (max-width: 1040px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  workspacePane: css`
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  `,
+  inspectorRail: css`
+    min-width: 0;
+    min-height: 0;
+    @media (min-width: 1101px) {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+    }
+    @container (max-width: 1040px) {
+      position: static;
+      max-height: none;
+      overflow: visible;
+    }
   `,
   header: css`
     display: flex;
@@ -561,14 +728,92 @@ const getStyles = (isDark: boolean) => ({
     gap: 12px;
     flex-wrap: wrap;
   `,
+  statusHeader: css`
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(260px, 0.9fr) minmax(340px, 1.1fr);
+    gap: 18px;
+    align-items: stretch;
+    padding: 14px 16px 14px 22px;
+    border-radius: 18px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(135deg, rgba(17,24,39,0.94) 0%, rgba(12,18,29,0.98) 62%, rgba(8,13,22,0.98) 100%)' : 'linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%)'};
+    overflow: hidden;
+    box-shadow: ${isDark ? '0 22px 70px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04)' : '0 16px 34px rgba(15,23,42,0.06)'};
+    @media (max-width: 920px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  statusRail: css`
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 5px;
+    border-radius: 18px 0 0 18px;
+  `,
+  statusMain: css`
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    padding-left: 48px;
+    @media (max-width: 700px) {
+      padding-left: 34px;
+    }
+  `,
+  statusIcon: css`
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    width: 30px;
+    height: 30px;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    color: #FCA5A5;
+    border: 1px solid rgba(248,113,113,0.62);
+    background: rgba(127,29,29,0.22);
+    box-shadow: 0 0 0 5px rgba(220,38,38,0.08);
+  `,
+  statusIconSvg: css`
+    width: 18px;
+    height: 18px;
+    overflow: visible;
+  `,
+  statusTitleRow: css`
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  `,
+  statusBadge: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+  `,
+  statusDot: css`
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 0 3px ${isDark ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.10)'};
+  `,
   titleBlock: css`
     display: flex;
     flex-direction: column;
     gap: 4px;
   `,
   title: css`
-    font-size: 18px;
-    font-weight: 700;
+    font-size: clamp(22px, 1.65vw, 30px);
+    font-weight: 800;
     letter-spacing: 0.01em;
   `,
   subtitle: css`
@@ -576,8 +821,23 @@ const getStyles = (isDark: boolean) => ({
     color: ${isDark ? '#94A3B8' : '#475569'};
     line-height: 1.5;
   `,
+  headerMetaGrid: css`
+    display: grid;
+    grid-template-columns: repeat(2, minmax(140px, max-content));
+    gap: 8px 24px;
+    color: ${isDark ? '#C7D2E4' : '#334155'};
+    font-size: 12px;
+    font-weight: 700;
+    @media (max-width: 700px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  metaAccent: css`
+    color: #F87171;
+    font-weight: 900;
+  `,
   recommendationBanner: css`
-    display: flex;
+    display: none;
     align-items: flex-start;
     gap: 10px;
     padding: 10px 12px;
@@ -620,12 +880,29 @@ const getStyles = (isDark: boolean) => ({
     gap: 8px;
     flex-wrap: wrap;
   `,
+  statusStats: css`
+    display: grid;
+    grid-template-columns: 1.18fr repeat(3, minmax(82px, 1fr));
+    gap: 10px;
+    align-content: stretch;
+    min-width: 0;
+    @media (max-width: 700px) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  `,
   statCard: css`
-    min-width: 112px;
-    padding: 10px 12px;
+    min-width: 0;
+    padding: 12px 13px;
     border-radius: 12px;
-    border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
-    background: ${isDark ? '#111827' : '#F8FAFC'};
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.12)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(30,41,59,0.62), rgba(15,23,42,0.82))' : '#F8FAFC'};
+    box-shadow: ${isDark ? 'inset 0 1px 0 rgba(255,255,255,0.04)' : 'none'};
+  `,
+  statCardPrimary: css`
+    border-color: rgba(248,113,113,0.38);
+    background: linear-gradient(145deg, #B91C1C 0%, #7F1D1D 100%);
+    color: #FFFFFF !important;
+    box-shadow: 0 12px 26px rgba(220,38,38,0.22), inset 0 1px 0 rgba(255,255,255,0.12);
   `,
   statLabel: css`
     font-size: 11px;
@@ -635,29 +912,123 @@ const getStyles = (isDark: boolean) => ({
   `,
   statValue: css`
     margin-top: 6px;
-    font-size: 18px;
-    font-weight: 700;
+    font-size: clamp(18px, 1.35vw, 22px);
+    font-weight: 850;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  `,
+  statCaption: css`
+    margin-top: 3px;
+    font-size: 11px;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+    font-weight: 800;
   `,
   chartCard: css`
     flex: 1 1 auto;
-    min-height: 240px;
+    min-height: clamp(340px, 45vh, 520px);
     position: relative;
-    border-radius: 16px;
-    border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
-    background: ${isDark ? '#08111F' : '#FFFFFF'};
+    border-radius: 12px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, #0A1321 0%, #07101D 100%)' : '#FFFFFF'};
     overflow: hidden;
-    box-shadow: ${isDark ? 'inset 0 1px 0 rgba(148,163,184,0.05)' : '0 14px 28px rgba(15,23,42,0.05)'};
+    box-shadow: ${isDark ? 'inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 44px rgba(0,0,0,0.22)' : '0 14px 28px rgba(15,23,42,0.05)'};
     outline: none;
     &:focus-visible {
       border-color: ${isDark ? '#60A5FA' : '#2563EB'};
       box-shadow: ${isDark ? '0 0 0 1px rgba(96,165,250,0.55), inset 0 1px 0 rgba(148,163,184,0.05)' : '0 0 0 1px rgba(37,99,235,0.35), 0 14px 28px rgba(15,23,42,0.05)'};
     }
   `,
+  incidentRibbonPanel: css`
+    position: relative;
+    min-height: 34px;
+    padding: 5px 10px;
+    border-radius: 13px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(15,23,42,0.92), rgba(8,13,22,0.98))' : '#FFFFFF'};
+    box-shadow: ${isDark ? 'inset 0 1px 0 rgba(255,255,255,0.035)' : '0 10px 22px rgba(15,23,42,0.04)'};
+  `,
+  incidentRibbonEmpty: css`
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 4px;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+    font-size: 12px;
+    font-weight: 700;
+  `,
   legend: css`
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
     align-items: center;
+  `,
+  legendTable: css`
+    border-radius: 12px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(15,23,42,0.94), rgba(10,16,26,0.98))' : '#FFFFFF'};
+    overflow: hidden;
+    min-width: 0;
+  `,
+  legendTableHeader: css`
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 96px 84px 104px;
+    gap: 10px;
+    padding: 8px 12px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+    border-bottom: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
+    @media (max-width: 700px) {
+      grid-template-columns: minmax(0, 1fr) 72px 72px;
+      & > span:last-child {
+        display: none;
+      }
+    }
+  `,
+  legendTableRow: css`
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 96px 84px 104px;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 12px;
+    border-bottom: 1px solid ${isDark ? 'rgba(30,41,59,0.7)' : 'rgba(215,227,244,0.8)'};
+    font-size: 12px;
+    &:last-child {
+      border-bottom: 0;
+    }
+    @media (max-width: 700px) {
+      grid-template-columns: minmax(0, 1fr) 72px 72px;
+      & > span:last-child {
+        display: none;
+      }
+    }
+  `,
+  legendTableFooter: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 12px;
+    border-top: 1px solid ${isDark ? 'rgba(30,41,59,0.8)' : 'rgba(215,227,244,0.9)'};
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+    font-size: 11px;
+    font-weight: 750;
+  `,
+  legendSeriesName: css`
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    color: ${isDark ? '#E2E8F0' : '#0F172A'};
+  `,
+  legendValue: css`
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: ${isDark ? '#CBD5E1' : '#334155'};
   `,
   legendItem: css`
     display: inline-flex;
@@ -684,15 +1055,40 @@ const getStyles = (isDark: boolean) => ({
     grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
     gap: 12px;
   `,
+  bottomDock: css`
+    display: grid;
+    grid-template-columns: minmax(360px, 1.1fr) minmax(280px, 0.9fr);
+    gap: 10px;
+    align-items: stretch;
+    @media (max-width: 920px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  secondaryDock: css`
+    display: grid;
+    grid-template-columns: minmax(420px, 1.35fr) minmax(260px, 0.65fr);
+    gap: 10px;
+    align-items: start;
+    @media (max-width: 920px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  sideUtilityStack: css`
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  `,
   card: css`
-    border-radius: 16px;
-    border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
-    background: ${isDark ? '#0B1220' : '#FFFFFF'};
+    border-radius: 12px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(15,23,42,0.94), rgba(10,16,26,0.98))' : '#FFFFFF'};
     padding: 14px;
     display: flex;
     flex-direction: column;
     gap: 12px;
     min-height: 0;
+    box-shadow: ${isDark ? 'inset 0 1px 0 rgba(255,255,255,0.035)' : '0 10px 24px rgba(15,23,42,0.045)'};
   `,
   cardTitle: css`
     font-size: 15px;
@@ -703,6 +1099,9 @@ const getStyles = (isDark: boolean) => ({
     display: flex;
     flex-direction: column;
     gap: 8px;
+    max-height: min(360px, 42vh);
+    overflow-y: auto;
+    padding-right: 4px;
   `,
   summaryTimeline: css`
     display: flex;
@@ -712,11 +1111,6 @@ const getStyles = (isDark: boolean) => ({
     border-radius: 14px;
     border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
     background: ${isDark ? '#0F172A' : '#F8FAFC'};
-  `,
-  summaryTimelineHint: css`
-    font-size: 11px;
-    line-height: 1.5;
-    color: ${isDark ? '#94A3B8' : '#64748B'};
   `,
   summaryRow: css`
     display: flex;
@@ -764,6 +1158,401 @@ const getStyles = (isDark: boolean) => ({
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  `,
+  compactHealthStrip: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    gap: 8px;
+  `,
+  scoreFeedTargetGrid: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+    gap: 8px;
+  `,
+  scoreFeedTargetCard: css`
+    min-width: 0;
+    min-height: 96px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 7px;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(15,23,42,0.82) 0%, rgba(8,13,22,0.72) 100%)' : 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)'};
+  `,
+  scoreFeedTargetTop: css`
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  `,
+  scoreFeedTargetIcon: css`
+    flex: 0 0 auto;
+    width: 27px;
+    height: 27px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: ${isDark ? 'rgba(15,23,42,0.92)' : '#F8FAFC'};
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.16)' : '#D7E3F4'};
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1;
+
+    svg {
+      display: block;
+      width: 18px;
+      height: 18px;
+    }
+  `,
+  scoreFeedTargetTitle: css`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 850;
+    color: ${isDark ? '#E2E8F0' : '#0F172A'};
+  `,
+  scoreFeedTargetStatus: css`
+    align-self: flex-start;
+    min-width: 62px;
+    display: inline-flex;
+    justify-content: center;
+    padding: 5px 10px;
+    border-radius: 7px;
+    font-size: 11px;
+    font-weight: 850;
+  `,
+  scoreFeedTargetMeta: css`
+    font-size: 11px;
+    font-weight: 750;
+    color: ${isDark ? '#AAB7CA' : '#64748B'};
+  `,
+  healthChip: css`
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6px;
+    min-height: 68px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(15,23,42,0.82) 0%, rgba(8,13,22,0.68) 100%)' : 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)'};
+  `,
+  healthChipCompact: css`
+    min-height: 58px;
+    padding: 9px 10px;
+  `,
+  healthChipText: css`
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  `,
+  healthChipLabel: css`
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+  `,
+  healthChipValue: css`
+    font-size: 12px;
+    font-weight: 800;
+    color: ${isDark ? '#E2E8F0' : '#0F172A'};
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  targetBadge: css`
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+  `,
+  targetIcon: css`
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: ${isDark ? 'rgba(37,99,235,0.18)' : '#EFF6FF'};
+    border: 1px solid ${isDark ? 'rgba(96,165,250,0.22)' : '#BFDBFE'};
+    font-size: 15px;
+    line-height: 1;
+
+    svg {
+      display: block;
+      width: 18px;
+      height: 18px;
+    }
+  `,
+  targetText: css`
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  `,
+  targetName: css`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 850;
+    color: ${isDark ? '#E2E8F0' : '#0F172A'};
+  `,
+  targetLanguage: css`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 750;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+  `,
+  labelChipGrid: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  `,
+  labelChip: css`
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    border: 1px solid ${isDark ? 'rgba(96,165,250,0.24)' : '#BFDBFE'};
+    background: ${isDark ? 'rgba(30,64,175,0.24)' : '#EFF6FF'};
+    color: ${isDark ? '#DBEAFE' : '#1D4ED8'};
+    font-size: 11px;
+    font-weight: 800;
+  `,
+  labelChipKey: css`
+    opacity: 0.72;
+  `,
+  labelChipValue: css`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  staleBanner: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border-radius: 14px;
+    border: 1px solid ${isDark ? '#92400E' : '#FDBA74'};
+    background: ${isDark ? 'rgba(146,64,14,0.22)' : '#FFF7ED'};
+    color: ${isDark ? '#FDBA74' : '#9A3412'};
+    font-size: 12px;
+    font-weight: 700;
+  `,
+  incidentHeader: css`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 8px 0;
+    flex-wrap: wrap;
+  `,
+  severityLegend: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    font-weight: 800;
+    color: ${isDark ? '#AAB7CA' : '#475569'};
+  `,
+  severityLegendItem: css`
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  `,
+  severityLegendSwatch: css`
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  `,
+  inlineInspectorLegacy: css`
+    display: none;
+  `,
+  inspectorCard: css`
+    min-height: 100%;
+    border-radius: 16px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.15)' : '#D7E3F4'};
+    background: ${isDark ? 'linear-gradient(180deg, rgba(15,23,42,0.98), rgba(8,13,22,0.99))' : '#FFFFFF'};
+    box-shadow: ${isDark ? '0 24px 70px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.045)' : '0 18px 34px rgba(15,23,42,0.08)'};
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  `,
+  inspectorTop: css`
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  `,
+  inspectorTitle: css`
+    font-size: 20px;
+    font-weight: 850;
+    letter-spacing: -0.01em;
+  `,
+  inspectorClose: css`
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+    font-size: 22px;
+    cursor: default;
+  `,
+  inspectorTimestamp: css`
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#E2E8F0'};
+    color: ${isDark ? '#D6DEEB' : '#334155'};
+    font-size: 15px;
+    font-weight: 800;
+  `,
+  inspectorRows: css`
+    display: grid;
+    gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid ${isDark ? 'rgba(148,163,184,0.13)' : '#E2E8F0'};
+  `,
+  inspectorRow: css`
+    display: grid;
+    grid-template-columns: minmax(110px, 0.72fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: baseline;
+    font-size: 13px;
+  `,
+  inspectorRowLabel: css`
+    color: ${isDark ? '#94A3B8' : '#64748B'};
+    font-weight: 750;
+  `,
+  inspectorRowValue: css`
+    min-width: 0;
+    color: ${isDark ? '#E2E8F0' : '#0F172A'};
+    font-weight: 800;
+    text-align: right;
+    overflow-wrap: anywhere;
+  `,
+  inspectorSectionTitle: css`
+    font-size: 14px;
+    font-weight: 850;
+    color: ${isDark ? '#EEF2FF' : '#0F172A'};
+  `,
+  inspectorHealthRow: css`
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 12px;
+  `,
+  inspectorPill: css`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 850;
+  `,
+  inspectorActionStack: css`
+    display: grid;
+    gap: 8px;
+  `,
+  inspectorActionButton: css`
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    border-radius: 9px;
+    font-size: 13px;
+    box-shadow: none;
+  `,
+  inspectorActionButtonPrimary: css`
+    border-color: #2563EB;
+    background: linear-gradient(180deg, #3B82F6 0%, #2563EB 100%);
+    color: #FFFFFF;
+  `,
+  inspectorActionButtonSecondary: css`
+    border-color: ${isDark ? 'rgba(148,163,184,0.18)' : '#CBD5E1'};
+    background: ${isDark ? 'rgba(15,23,42,0.72)' : '#F8FAFC'};
+    color: ${isDark ? '#D6DEEB' : '#334155'};
+  `,
+  queryPreview: css`
+    max-height: 170px;
+    overflow: auto;
+    margin: 0;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid ${isDark ? 'rgba(148,163,184,0.14)' : '#D7E3F4'};
+    background: ${isDark ? '#101820' : '#F8FAFC'};
+    color: ${isDark ? '#FBBF24' : '#92400E'};
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 10.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  `,
+  scoreFeedCard: css`
+    min-width: 0;
+    position: relative;
+    overflow: hidden;
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: ${isDark ? 'linear-gradient(180deg, #38BDF8 0%, #2563EB 55%, #22C55E 100%)' : 'linear-gradient(180deg, #0EA5E9 0%, #2563EB 55%, #16A34A 100%)'};
+      opacity: 0.9;
+    }
+  `,
+  profileCard: css`
+    gap: 10px;
+  `,
+  profileSummary: css`
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  `,
+  profileDetailGrid: css`
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    @media (max-width: 520px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  handoffCard: css`
+    padding: 12px;
+    gap: 10px;
+    background: ${isDark ? 'linear-gradient(180deg, rgba(8,13,22,0.88), rgba(6,10,18,0.96))' : 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)'};
+  `,
+  handoffHeader: css`
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
   `,
   detailGrid: css`
     display: grid;
@@ -973,6 +1762,46 @@ const getStyles = (isDark: boolean) => ({
     padding: 20px;
     line-height: 1.6;
   `,
+  skeletonShell: css`
+    display: grid;
+    grid-template-rows: auto minmax(240px, 1fr) auto;
+    gap: 12px;
+  `,
+  skeletonBlock: css`
+    position: relative;
+    overflow: hidden;
+    min-height: 20px;
+    border-radius: 14px;
+    border: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
+    background: ${isDark ? '#111827' : '#F8FAFC'};
+    &::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, ${isDark ? 'rgba(148,163,184,0.12)' : 'rgba(148,163,184,0.22)'}, transparent);
+      animation: anomaly-shimmer 1.45s infinite;
+    }
+    @keyframes anomaly-shimmer {
+      100% {
+        transform: translateX(100%);
+      }
+    }
+  `,
+  skeletonHeader: css`
+    height: 86px;
+  `,
+  skeletonChart: css`
+    min-height: 320px;
+  `,
+  skeletonRows: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  `,
+  skeletonRow: css`
+    height: 128px;
+  `,
 });
 
 const asNumber = (value: unknown): number | null => {
@@ -1000,61 +1829,10 @@ const getVectorValue = (values: VectorLike | undefined, index: number): unknown 
   return values[index];
 };
 
-const mean = (values: number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
-
 const median = (values: number[]): number => {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
-};
-
-const mad = (values: number[], center?: number): number => {
-  if (values.length === 0) {
-    return 0;
-  }
-
-  const medianCenter = center ?? median(values);
-  return median(values.map((value) => Math.abs(value - medianCenter))) * 1.4826;
-};
-
-const standardDeviation = (values: number[], center?: number): number => {
-  if (values.length <= 1) {
-    return 0;
-  }
-
-  const avg = center ?? mean(values);
-  const variance = values.reduce((sum, value) => sum + (value - avg) ** 2, 0) / values.length;
-  return Math.sqrt(variance);
-};
-
-const safeSpread = (spread: number, reference: number): number => {
-  if (Number.isFinite(spread) && spread > 1e-9) {
-    return spread;
-  }
-
-  return Math.max(Math.abs(reference) * 0.02, 1e-6);
-};
-
-const getSeasonalBucketKeys = (timestampMs: number): Record<'hour_of_day' | 'weekday_hour', string> => {
-  const date = new Date(timestampMs);
-  return {
-    hour_of_day: `hour:${date.getHours()}`,
-    weekday_hour: `weekday:${date.getDay()}-${date.getHours()}`,
-  };
-};
-
-const getSeasonalExpectedAndSpread = (peers: number[], recentHistory: number[]): { expected: number; spread: number } => {
-  const expected = median(peers);
-  const peerSpread = safeSpread(mad(peers, expected), expected);
-  const deltas = peers.slice(1).map((value, index) => value - peers[index]);
-  const trend = deltas.length >= 2 ? median(deltas) : 0;
-  const deltaSpread = deltas.length >= 2 ? safeSpread(mad(deltas, trend), expected) : 0;
-  const localSpread = recentHistory.length > 0 ? safeSpread(mad(recentHistory), median(recentHistory)) : 0;
-  const spread = Math.max(peerSpread, deltaSpread, localSpread * 0.75);
-  return {
-    expected: expected + trend,
-    spread: safeSpread(spread, expected + trend),
-  };
 };
 
 const formatValue = (value: number | null): string => {
@@ -1072,6 +1850,14 @@ const formatValue = (value: number | null): string => {
   }
 
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+};
+
+const formatScoreValue = (value: number | null): string => {
+  if (value === null || !Number.isFinite(value)) {
+    return 'n/a';
+  }
+
+  return Math.round(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
 };
 
 const formatAxisValue = (value: number): string => {
@@ -1371,7 +2157,7 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
       effectiveMetricPreset: 'custom',
       detectionMode: options.detectionMode ?? 'single',
       algorithm: options.algorithm ?? 'zscore',
-      sensitivity: Math.max(0.2, options.sensitivity ?? 2.8),
+      sensitivity: Math.max(0.2, options.sensitivity ?? 4.0),
       baselineWindow: Math.max(3, Math.round(options.baselineWindow ?? 12)),
       seasonalitySamples: Math.max(2, Math.round(options.seasonalitySamples ?? 24)),
       seasonalRefinement: options.seasonalRefinement ?? 'cycle',
@@ -1379,7 +2165,7 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
       bucketSpan,
       showExpectedLine: options.showExpectedLine !== false,
       showInlineSeriesLabels: options.showInlineSeriesLabels !== false,
-      showFocusBand: options.showFocusBand !== false,
+      showFocusBand: options.showFocusBand === true,
       timeAxisDensity: options.timeAxisDensity ?? 'auto',
       timeAxisPlacement: options.timeAxisPlacement ?? 'top_and_bottom',
       markerShapeMode: options.markerShapeMode ?? 'severity',
@@ -1410,7 +2196,7 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
     bucketSpan,
     showExpectedLine: options.showExpectedLine !== false,
     showInlineSeriesLabels: options.showInlineSeriesLabels !== false,
-    showFocusBand: options.showFocusBand !== false,
+    showFocusBand: options.showFocusBand === true,
     timeAxisDensity: options.timeAxisDensity ?? 'auto',
     timeAxisPlacement: options.timeAxisPlacement ?? 'top_and_bottom',
     markerShapeMode: options.markerShapeMode ?? 'severity',
@@ -1442,111 +2228,6 @@ const pickHigherSeverity = (current: SeverityState, candidate: SeverityState): S
   }
 
   return current;
-};
-
-const getSeverityState = (score: number, threshold: number, severityPreset: SeverityPreset): SeverityState => {
-  const preset = SEVERITY_THRESHOLDS[severityPreset];
-  const safeThreshold = Math.max(threshold, 0.0001);
-  const ratio = score / safeThreshold;
-
-  if (ratio < 1) {
-    return {
-      severityScore: Math.min(preset.low - 1, Math.round(ratio * (preset.low - 1))),
-      severityLabel: 'normal',
-    };
-  }
-
-  const severityScore = Math.min(100, Math.round(preset.low + (ratio - 1) * 30));
-
-  if (severityScore >= preset.critical) {
-    return { severityScore, severityLabel: 'critical' };
-  }
-
-  if (severityScore >= preset.high) {
-    return { severityScore, severityLabel: 'high' };
-  }
-
-  if (severityScore >= preset.medium) {
-    return { severityScore, severityLabel: 'medium' };
-  }
-
-  return { severityScore, severityLabel: 'low' };
-};
-
-const getWindowScore = (history: number[], currentValue: number, expected: number, spread: number, window: number): number => {
-  const contextWindow = Math.min(Math.max(3, Math.floor(window / 3)), 10);
-  const recent = [...history.slice(-(contextWindow - 1)), currentValue];
-  if (recent.length < 3) {
-    return 0;
-  }
-
-  return Math.abs(mean(recent) - expected) / spread;
-};
-
-const getDataQualityState = (points: RawPoint[], index: number, baselineWindow: number): DataQualityLabel => {
-  const history = points.slice(Math.max(0, index - baselineWindow), index + 1);
-  const values = history.map((entry) => entry.value);
-  const recent = history.slice(-Math.max(4, Math.min(baselineWindow, 8)));
-
-  if (values.length < Math.max(MIN_BASELINE_POINTS, Math.floor(baselineWindow / 2))) {
-    return 'thin';
-  }
-
-  if (recent.length >= 3) {
-    const diffs = recent.slice(1).map((point, offset) => point.time - recent[offset].time).filter((diff) => diff > 0);
-    const expectedStep = diffs.length > 0 ? median(diffs) : null;
-    if (expectedStep && diffs.some((diff) => diff > expectedStep * 2.4)) {
-      return 'gappy';
-    }
-  }
-
-  if (recent.length >= 4) {
-    const recentValues = recent.map((entry) => entry.value);
-    const floor = Math.max(Math.abs(mean(recentValues)) * 0.002, 1e-6);
-    if (Math.max(...recentValues) - Math.min(...recentValues) <= floor) {
-      return 'flatline';
-    }
-  }
-
-  return 'healthy';
-};
-
-const getConfidenceState = (
-  rawScore: number,
-  threshold: number,
-  pointRawScore: number,
-  windowRawScore: number,
-  sampleCount: number,
-  dataQualityLabel: DataQualityLabel
-): ConfidenceState => {
-  const safeThreshold = Math.max(threshold, 1e-6);
-  const ratio = Math.min(rawScore / safeThreshold, 2.5);
-  let confidenceScore = (ratio / 2.5) * 100;
-
-  if (windowRawScore > pointRawScore) {
-    confidenceScore += 8;
-  }
-
-  if (sampleCount >= 8) {
-    confidenceScore += 4;
-  }
-
-  if (dataQualityLabel === 'thin') {
-    confidenceScore -= 18;
-  } else if (dataQualityLabel === 'flatline') {
-    confidenceScore -= 22;
-  } else if (dataQualityLabel === 'gappy') {
-    confidenceScore -= 12;
-  }
-
-  const boundedScore = Math.max(5, Math.min(100, Math.round(confidenceScore * 10) / 10));
-  const confidenceLabel: ConfidenceLabel = boundedScore >= 80 ? 'high' : boundedScore >= 55 ? 'medium' : 'low';
-
-  return {
-    confidenceScore: boundedScore,
-    confidenceLabel,
-    dataQualityLabel,
-  };
 };
 
 const pickWorseDataQuality = (current: DataQualityLabel, candidate: DataQualityLabel): DataQualityLabel => {
@@ -1734,22 +2415,46 @@ const buildRawPoint = (time: number, value: number): RawPoint => ({
   minValue: value,
   maxValue: value,
 });
-const buildEmptyPoint = (point: RawPoint): SamplePoint => ({
-  ...point,
-  expected: null,
-  upper: null,
-  lower: null,
-  score: 0,
-  pointScore: 0,
-  windowScore: 0,
-  scoreDriver: 'point',
-  isAnomaly: false,
-  severityLabel: 'normal',
-  severityScore: 0,
-  confidenceScore: 5,
-  confidenceLabel: 'low',
-  dataQualityLabel: 'thin',
-});
+
+const nonBlankDisplayName = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  return value.trim().length > 0 ? value : null;
+};
+
+const resolveSeriesDisplayName = (field: SeriesDisplayNameField, frameName?: string, fallback = 'Series'): string => {
+  return (
+    nonBlankDisplayName(field.config?.displayNameFromDS) ??
+    nonBlankDisplayName(field.config?.displayName) ??
+    nonBlankDisplayName(field.state?.displayName) ??
+    nonBlankDisplayName(field.name) ??
+    nonBlankDisplayName(frameName) ??
+    fallback
+  );
+};
+
+const hasGrafanaDisplayName = (field: SeriesDisplayNameField): boolean =>
+  Boolean(
+    nonBlankDisplayName(field.config?.displayNameFromDS) ??
+      nonBlankDisplayName(field.config?.displayName) ??
+      nonBlankDisplayName(field.state?.displayName)
+  );
+
+const resolveSectionVisibility = (options: Partial<SimpleOptions>): SectionVisibility => {
+  const legacySummaryVisible = options.showSummary !== false;
+  return {
+    initialLabels: options.showInitialLabels !== false,
+    statistics: options.showStatistics !== false,
+    mainChart: options.showMainChart !== false,
+    inspector: options.showInspector !== false,
+    anomalyFeed: legacySummaryVisible && options.showAnomalyFeed !== false,
+    seriesSummary: options.showSeriesSummary !== false,
+    scoreFeed: options.showScoreFeed !== false,
+    detectionProfile: legacySummaryVisible && options.showDetectionProfile !== false,
+    exports: legacySummaryVisible && options.showExports !== false,
+  };
+};
 
 const collectPreparedSeries = (series: Props['data']['series']): PreparedSeries[] => {
   const prepared: PreparedSeries[] = [];
@@ -1779,11 +2484,12 @@ const collectPreparedSeries = (series: Props['data']['series']): PreparedSeries[
       }
 
       points.sort((left, right) => left.time - right.time);
-      const label = field.config.displayName || field.state?.displayName || field.name || frame.name || `Series ${prepared.length + 1}`;
+      const label = resolveSeriesDisplayName(field, frame.name, `Series ${prepared.length + 1}`);
       const fixedColor = field.config.color?.fixedColor;
       prepared.push({
-        key: `${frame.name ?? frameIndex}-${field.name ?? fieldIndex}`,
+        key: `${frame.name ?? frameIndex}-${field.name ?? fieldIndex}-${frameIndex}-${fieldIndex}`,
         label,
+        preservesGrafanaDisplayName: hasGrafanaDisplayName(field),
         color: fixedColor || SERIES_COLORS[prepared.length % SERIES_COLORS.length],
         rawPoints: dedupeConsecutivePoints(points),
       });
@@ -1798,7 +2504,7 @@ const collectPreparedSeries = (series: Props['data']['series']): PreparedSeries[
   const seenLabels = new Map<string, number>();
   return prepared.map((item) => {
     const total = labelTotals.get(item.label) ?? 1;
-    if (total <= 1) {
+    if (total <= 1 || item.preservesGrafanaDisplayName) {
       return item;
     }
 
@@ -1811,220 +2517,6 @@ const collectPreparedSeries = (series: Props['data']['series']): PreparedSeries[
   });
 };
 
-const buildZScorePoints = (points: RawPoint[], threshold: number, window: number, severityPreset: SeverityPreset): SamplePoint[] =>
-  points.map((point, index) => {
-    const history = points.slice(Math.max(0, index - window), index).map((entry) => entry.value);
-    if (history.length < MIN_BASELINE_POINTS) {
-      return buildEmptyPoint(point);
-    }
-
-    const expected = mean(history);
-    const spread = safeSpread(standardDeviation(history, expected), expected);
-    const pointScore = Math.abs(point.value - expected) / spread;
-    const windowScore = 0;
-    const score = pointScore;
-    const severity = getSeverityState(score, threshold, severityPreset);
-    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, history.length + 1, getDataQualityState(points, index, window));
-
-    return {
-      ...point,
-      expected,
-      lower: expected - threshold * spread,
-      upper: expected + threshold * spread,
-      score,
-      pointScore,
-      windowScore,
-      scoreDriver: windowScore > pointScore ? 'window' : 'point',
-      isAnomaly: score >= threshold,
-      ...severity,
-      ...confidence,
-    };
-  });
-
-const buildMadPoints = (points: RawPoint[], threshold: number, window: number, severityPreset: SeverityPreset): SamplePoint[] =>
-  points.map((point, index) => {
-    const history = points.slice(Math.max(0, index - window), index).map((entry) => entry.value);
-    if (history.length < MIN_BASELINE_POINTS) {
-      return buildEmptyPoint(point);
-    }
-
-    const expected = median(history);
-    const deviationHistory = history.map((value) => Math.abs(value - expected));
-    const mad = median(deviationHistory) * 1.4826;
-    const spread = safeSpread(mad, expected);
-    const pointScore = Math.abs(point.value - expected) / spread;
-    const windowScore = 0;
-    const score = pointScore;
-    const severity = getSeverityState(score, threshold, severityPreset);
-    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, history.length + 1, getDataQualityState(points, index, window));
-
-    return {
-      ...point,
-      expected,
-      lower: expected - threshold * spread,
-      upper: expected + threshold * spread,
-      score,
-      pointScore,
-      windowScore,
-      scoreDriver: windowScore > pointScore ? 'window' : 'point',
-      isAnomaly: score >= threshold,
-      ...severity,
-      ...confidence,
-    };
-  });
-
-const buildEwmaPoints = (points: RawPoint[], threshold: number, window: number, severityPreset: SeverityPreset): SamplePoint[] => {
-  const results: SamplePoint[] = [];
-  const alpha = 2 / (Math.max(window, 2) + 1);
-  let smoothed: number | null = null;
-  const residualHistory: number[] = [];
-
-  points.forEach((point, index) => {
-    if (index === 0 || smoothed === null) {
-      smoothed = point.value;
-      results.push(buildEmptyPoint(point));
-      return;
-    }
-
-    const expected = smoothed;
-    const spread = safeSpread(median(residualHistory.slice(-window)) || standardDeviation(points.slice(Math.max(0, index - window), index).map((entry) => entry.value)), expected);
-    const history = points.slice(Math.max(0, index - window), index).map((entry) => entry.value);
-    const pointScore = Math.abs(point.value - expected) / spread;
-    const windowScore = getWindowScore(history, point.value, expected, spread, window);
-    const score = Math.max(pointScore, windowScore);
-    const severity = getSeverityState(score, threshold, severityPreset);
-    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, history.length + 1, getDataQualityState(points, index, window));
-    residualHistory.push(Math.abs(point.value - expected));
-    smoothed = alpha * point.value + (1 - alpha) * expected;
-
-    results.push({
-      ...point,
-      expected,
-      lower: expected - threshold * spread,
-      upper: expected + threshold * spread,
-      score,
-      pointScore,
-      windowScore,
-      scoreDriver: windowScore > pointScore ? 'window' : 'point',
-      isAnomaly: score >= threshold,
-      ...severity,
-      ...confidence,
-    });
-  });
-
-  return results;
-};
-
-const buildSeasonalPoints = (
-  points: RawPoint[],
-  threshold: number,
-  window: number,
-  seasonalitySamples: number,
-  refinement: SeasonalRefinement,
-  severityPreset: SeverityPreset
-): SamplePoint[] => {
-  const hourlyHistory = new Map<string, number[]>();
-  const weekdayHistory = new Map<string, number[]>();
-
-  return points.map((point, index) => {
-    let peers: number[] = [];
-    if (refinement === 'cycle') {
-      for (let cursor = index - seasonalitySamples; cursor >= 0 && peers.length < window; cursor -= seasonalitySamples) {
-        peers.push(points[cursor].value);
-      }
-    } else {
-      const bucketKeys = getSeasonalBucketKeys(point.time);
-      peers =
-        refinement === 'hour_of_day'
-          ? [...(hourlyHistory.get(bucketKeys.hour_of_day) ?? [])].slice(-window)
-          : [...(weekdayHistory.get(bucketKeys.weekday_hour) ?? [])].slice(-window);
-
-      if (refinement === 'weekday_hour' && peers.length < MIN_SEASONAL_SAMPLES) {
-        peers = [...(hourlyHistory.get(bucketKeys.hour_of_day) ?? [])].slice(-window);
-      }
-
-      const hourStored = hourlyHistory.get(bucketKeys.hour_of_day) ?? [];
-      hourStored.push(point.value);
-      hourlyHistory.set(bucketKeys.hour_of_day, hourStored);
-
-      const weekdayStored = weekdayHistory.get(bucketKeys.weekday_hour) ?? [];
-      weekdayStored.push(point.value);
-      weekdayHistory.set(bucketKeys.weekday_hour, weekdayStored);
-    }
-
-    if (peers.length < MIN_SEASONAL_SAMPLES) {
-      return buildEmptyPoint(point);
-    }
-
-    const recentHistory = points.slice(Math.max(0, index - window), index).map((entry) => entry.value);
-    const { expected, spread } = getSeasonalExpectedAndSpread(peers, recentHistory);
-    const pointScore = Math.abs(point.value - expected) / spread;
-    const windowScore = 0;
-    const score = pointScore;
-    const severity = getSeverityState(score, threshold, severityPreset);
-    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, recentHistory.length + 1, getDataQualityState(points, index, window));
-
-    return {
-      ...point,
-      expected,
-      lower: expected - threshold * spread,
-      upper: expected + threshold * spread,
-      score,
-      pointScore,
-      windowScore,
-      scoreDriver: windowScore > pointScore ? 'window' : 'point',
-      isAnomaly: score >= threshold,
-      ...severity,
-      ...confidence,
-    };
-  });
-};
-
-const buildLevelShiftPoints = (points: RawPoint[], threshold: number, window: number, severityPreset: SeverityPreset): SamplePoint[] =>
-  points.map((point, index) => {
-    const history = points.slice(Math.max(0, index - window), index);
-    const historyValues = history.map((entry) => entry.value);
-    if (historyValues.length < Math.max(MIN_BASELINE_POINTS * 2, 6)) {
-      return buildEmptyPoint(point);
-    }
-
-    const shiftWindow = Math.min(Math.max(3, Math.floor(window / 3)), 12);
-    const baselineHistory = historyValues.slice(-window);
-    if (baselineHistory.length <= shiftWindow) {
-      return buildEmptyPoint(point);
-    }
-
-    const baselineOnly = baselineHistory.slice(0, -Math.max(1, shiftWindow - 1));
-    if (baselineOnly.length < MIN_BASELINE_POINTS) {
-      return buildEmptyPoint(point);
-    }
-
-    const expected = median(baselineOnly);
-    const spread = Math.max(safeSpread(mad(baselineOnly, expected), expected), safeSpread(standardDeviation(baselineOnly, expected), expected));
-    const pointScore = Math.abs(point.value - expected) / spread;
-    const recent = [...historyValues.slice(-(shiftWindow - 1)), point.value];
-    const recentCenter = median(recent);
-    const persistentBuckets = recent.filter((value) => Math.abs(value - expected) > spread).length;
-    const persistenceRatio = persistentBuckets / recent.length;
-    const windowScore = (Math.abs(recentCenter - expected) / spread) * (1 + Math.max(0, persistenceRatio - 0.4));
-    const score = Math.max(pointScore * 0.85, windowScore);
-    const severity = getSeverityState(score, threshold, severityPreset);
-    const confidence = getConfidenceState(score, threshold, pointScore, windowScore, baselineHistory.length + 1, getDataQualityState(points, index, window));
-
-    return {
-      ...point,
-      expected,
-      lower: expected - threshold * spread,
-      upper: expected + threshold * spread,
-      score,
-      pointScore,
-      windowScore,
-      scoreDriver: windowScore >= pointScore * 0.85 ? 'window' : 'point',
-      isAnomaly: score >= threshold,
-      ...severity,
-      ...confidence,
-    };
-  });
 const downsamplePoints = (points: SamplePoint[]): SamplePoint[] => {
   if (points.length <= MAX_RENDER_POINTS) {
     return points;
@@ -2050,22 +2542,14 @@ const downsamplePoints = (points: SamplePoint[]): SamplePoint[] => {
 };
 
 const analyzePoints = (points: RawPoint[], options: ResolvedOptions): SamplePoint[] => {
-  const window = Math.max(options.baselineWindow, 3);
-  const threshold = Math.max(options.sensitivity, 0.2);
-
-  switch (options.algorithm) {
-    case 'mad':
-      return buildMadPoints(points, threshold, window, options.severityPreset);
-    case 'ewma':
-      return buildEwmaPoints(points, threshold, window, options.severityPreset);
-    case 'level_shift':
-      return buildLevelShiftPoints(points, threshold, window, options.severityPreset);
-    case 'seasonal':
-      return buildSeasonalPoints(points, threshold, window, Math.max(options.seasonalitySamples, 2), options.seasonalRefinement, options.severityPreset);
-    case 'zscore':
-    default:
-      return buildZScorePoints(points, threshold, window, options.severityPreset);
-  }
+  return analyzeCanonicalPoints(points, {
+    algorithm: options.algorithm,
+    sensitivity: options.sensitivity,
+    baselineWindow: options.baselineWindow,
+    seasonalitySamples: options.seasonalitySamples,
+    seasonalRefinement: options.seasonalRefinement,
+    severityPreset: options.severityPreset,
+  });
 };
 
 const buildAnalyses = (preparedSeries: PreparedSeries[], options: ResolvedOptions): AnalysisBuildResult => {
@@ -2693,17 +3177,50 @@ const selectionExists = (selection: SelectionToken | null, analyses: SeriesAnaly
   return analyses.some((analysis) => analysis.key === selection.seriesKey && analysis.allPoints.some((point) => point.time === selection.time));
 };
 
+const findClosestSelectionPoint = (
+  selection: Extract<SelectionToken, { kind: 'point' }>,
+  analyses: SeriesAnalysis[]
+): { analysis: SeriesAnalysis; point: SamplePoint } | null => {
+  const preferred = analyses.find((item) => item.key === selection.seriesKey) ?? null;
+  const candidates = preferred ? [preferred, ...analyses.filter((item) => item.key !== preferred.key)] : analyses;
+
+  for (const analysis of candidates) {
+    const exact = analysis.allPoints.find((item) => item.time === selection.time);
+    if (exact) {
+      return { analysis, point: exact };
+    }
+  }
+
+  let closest: { analysis: SeriesAnalysis; point: SamplePoint; distance: number } | null = null;
+  let fallback: { analysis: SeriesAnalysis; point: SamplePoint; distance: number } | null = null;
+  for (const analysis of candidates) {
+    for (const point of analysis.allPoints) {
+      const bucketSpan = Math.max(point.bucketEnd - point.bucketStart, 1);
+      const distance = Math.abs(point.time - selection.time);
+      if (point.isAnomaly && (!fallback || distance < fallback.distance)) {
+        fallback = { analysis, point, distance };
+      }
+      if (distance <= bucketSpan * 1.5 && (!closest || distance < closest.distance)) {
+        closest = { analysis, point, distance };
+      }
+    }
+  }
+
+  const match = closest ?? fallback;
+  return match ? { analysis: match.analysis, point: match.point } : null;
+};
+
 const buildSelectionDetail = (selection: SelectionToken | null, analyses: SeriesAnalysis[], events: MultiMetricEvent[]): SelectionDetail | null => {
   if (!selection) {
     return null;
   }
 
   if (selection.kind === 'point') {
-    const analysis = analyses.find((item) => item.key === selection.seriesKey);
-    const point = analysis?.allPoints.find((item) => item.time === selection.time);
-    if (!analysis || !point) {
+    const match = findClosestSelectionPoint(selection, analyses);
+    if (!match) {
       return null;
     }
+    const { analysis, point } = match;
 
     const deviation = point.expected === null ? null : point.value - point.expected;
     const deviationPercent = point.expected && Math.abs(point.expected) > 1e-9 ? (deviation! / point.expected) * 100 : null;
@@ -2792,13 +3309,66 @@ const buildSelectionDetail = (selection: SelectionToken | null, analyses: Series
   };
 };
 
+const buildFallbackSelectionDetail = (item: SummaryItem | null): SelectionDetail | null => {
+  if (!item) {
+    return null;
+  }
+
+  return {
+    kind: 'point',
+    title: item.title,
+    subtitle: item.subtitle,
+    seriesKey: selectionKey(item.selection),
+    seriesLabel: item.title,
+    color: SEVERITY_COLORS[item.severityLabel],
+    time: item.time,
+    bucketStart: item.time,
+    bucketEnd: item.time + 1,
+    actual: item.score,
+    expected: null,
+    deviation: null,
+    deviationPercent: null,
+    rangeLower: null,
+    rangeUpper: null,
+    sampleCount: 1,
+    minValue: item.score,
+    maxValue: item.score,
+    score: item.score,
+    pointScore: item.score,
+    windowScore: 0,
+    scoreDriver: 'point',
+    severityLabel: item.severityLabel,
+    severityScore: item.severityScore,
+    confidenceScore: item.confidenceScore,
+    confidenceLabel: item.confidenceLabel,
+    dataQualityLabel: item.dataQualityLabel,
+  };
+};
+
+const uniqueTagValues = (values: Array<string | null | undefined>): string[] => {
+  const seen = new Set<string>();
+  return values
+    .map((value) => (value ?? '').trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) {
+        return false;
+      }
+
+      seen.add(value);
+      return true;
+    });
+};
+
 const buildAnnotationExport = (items: SummaryItem[], bucketSpanLabel: string): string =>
   JSON.stringify(
     items.map((item) => ({
       time: item.time,
       text: item.title,
-      tags: ['anomaly-detector', item.severityLabel, item.confidenceLabel, item.dataQualityLabel, bucketSpanLabel],
+      tags: uniqueTagValues(['anomaly-detector', item.severityLabel, item.confidenceLabel, item.dataQualityLabel, bucketSpanLabel]),
       detail: item.detail,
+      raw_score: item.score,
+      alarm_score_0_100: item.severityScore,
+      alarm_severity: item.severityLabel,
       confidence_score: item.confidenceScore,
       confidence_label: item.confidenceLabel,
       data_quality: item.dataQualityLabel,
@@ -2818,38 +3388,263 @@ const getRecommendedAlertThreshold = (severityPreset: SeverityPreset): number =>
   }
 };
 
+const GRAFANA_ALERT_RULE_BUILDER_PATH = '/alerting/new';
+const ALERT_DRAFT_STORAGE_KEY = 'grafana-anomaly-alert-draft';
+
+const formatLabelPairs = (labels: Record<string, string>): string =>
+  Object.entries(labels)
+    .filter(([, value]) => value.length > 0)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+
+const setFormControlValue = (targetWindow: Window, selector: string, value: string): boolean => {
+  const element = targetWindow.document.querySelector(selector);
+  if (!element) {
+    return false;
+  }
+
+  const tagName = element.tagName.toLowerCase();
+  if (tagName !== 'input' && tagName !== 'textarea') {
+    return false;
+  }
+
+  const control = element as HTMLInputElement | HTMLTextAreaElement;
+  control.value = value;
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+};
+
+const tryPrefillGrafanaAlertBuilder = (builderWindow: Window, draft: AlertRuleDraftContext): void => {
+  let attempts = 0;
+  const fill = () => {
+    attempts += 1;
+
+    try {
+      const doc = builderWindow.document;
+      if (!doc || builderWindow.closed) {
+        return;
+      }
+
+      setFormControlValue(builderWindow, '[data-testid="data-testid alert-rule name-field"], input[name="name"], input[placeholder="Give your alert rule a name"]', draft.ruleName);
+      setFormControlValue(builderWindow, 'input[type="number"]', String(draft.threshold));
+      setFormControlValue(builderWindow, '[data-testid="annotation-value-0"], textarea[name="annotations.0.value"]', draft.annotations.summary ?? draft.ruleName);
+      setFormControlValue(builderWindow, '[data-testid="annotation-value-1"], textarea[name="annotations.1.value"]', draft.annotations.description ?? '');
+
+      if (draft.queryLanguage.toLowerCase() === 'promql') {
+        const codeMode = doc.querySelector('input[id^="option-code-radiogroup"]');
+        if (codeMode && attempts <= 2 && typeof (codeMode as HTMLElement).click === 'function') {
+          (codeMode as HTMLElement).click();
+        }
+
+        const querySelector = [
+          'textarea[placeholder*="PromQL"]',
+          'textarea[aria-label*="Query"]',
+          'textarea[aria-label*="Editor content"]',
+          'input[placeholder*="PromQL"]',
+          'input[aria-label*="Query"]',
+          'textarea[name*="expr"]',
+          'input[name*="expr"]',
+        ].join(',');
+        setFormControlValue(builderWindow, querySelector, draft.alertQuery);
+      }
+    } catch {
+      // Grafana owns the builder route. Prefill is best-effort and must not break the panel flow.
+    }
+
+    if (attempts < 18 && !builderWindow.closed) {
+      builderWindow.setTimeout(fill, 450);
+    }
+  };
+
+  builderWindow.setTimeout(fill, 450);
+};
+
+const openGrafanaAlertRuleBuilder = (draft: AlertRuleDraftContext): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const builderUrl = new URL(GRAFANA_ALERT_RULE_BUILDER_PATH, window.location.origin);
+  const currentOrgId = new URLSearchParams(window.location.search).get('orgId');
+  if (currentOrgId) {
+    builderUrl.searchParams.set('orgId', currentOrgId);
+  }
+
+  if (draft.dashboardUid) {
+    builderUrl.searchParams.set('dashboardUid', draft.dashboardUid);
+  }
+
+  if (draft.panelId > 0) {
+    builderUrl.searchParams.set('panelId', String(draft.panelId));
+  }
+
+  builderUrl.searchParams.set('title', draft.ruleName);
+  builderUrl.searchParams.set('ruleName', draft.ruleName);
+  if (draft.folderTitle) {
+    builderUrl.searchParams.set('folderTitle', draft.folderTitle);
+  }
+  builderUrl.searchParams.set('dashboardTitle', draft.dashboardTitle);
+  builderUrl.searchParams.set('panelTitle', draft.panelTitle);
+  builderUrl.searchParams.set('queryLanguage', draft.queryLanguage);
+  builderUrl.searchParams.set('threshold', String(draft.threshold));
+  builderUrl.searchParams.set('for', '10m');
+  builderUrl.searchParams.set('evaluateEvery', '3m');
+  builderUrl.searchParams.set('labels', formatLabelPairs(draft.labels));
+
+  Object.entries(draft.labels).forEach(([key, value]) => {
+    if (value) {
+      builderUrl.searchParams.set(`label_${key}`, value);
+    }
+  });
+
+  if (draft.alertQuery && draft.alertQuery.length <= 1400) {
+    builderUrl.searchParams.set('query', draft.alertQuery);
+  }
+
+  builderUrl.searchParams.set('returnTo', `${window.location.pathname}${window.location.search}`);
+
+  try {
+    window.sessionStorage.setItem(ALERT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // Session storage can be disabled in hardened browser contexts. The URL and clipboard still carry the draft.
+  }
+
+  const builderWindow = window.open(builderUrl.toString(), '_blank');
+  if (!builderWindow) {
+    return false;
+  }
+
+  tryPrefillGrafanaAlertBuilder(builderWindow, draft);
+  return true;
+};
+
 const escapePrometheusRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const buildAlertPromQuery = (registeredRules: ScoreFeedRule[]): string => {
+const isPrometheusFeedRule = (rule: ScoreFeedRule): boolean => {
+  const language = (rule.queryLanguage ?? '').toLowerCase();
+  const target = (rule.target ?? '').toLowerCase();
+  return language === 'promql' || target === 'prometheus' || (!language && rule.query.includes('grafana_anomaly_rule_score'));
+};
+
+const buildAlertQuery = (registeredRules: ScoreFeedRule[]): string => {
   if (registeredRules.length === 0) {
     return '';
   }
 
   if (registeredRules.length === 1) {
-    return `max_over_time(grafana_anomaly_rule_score{rule="${registeredRules[0].rule}"}[5m])`;
+    return registeredRules[0].query;
+  }
+
+  if (!registeredRules.every(isPrometheusFeedRule)) {
+    return registeredRules.map((rule) => rule.query).join('\n\n');
   }
 
   const matcher = registeredRules.map((rule) => escapePrometheusRegex(rule.rule)).join('|');
   return `max(max_over_time(grafana_anomaly_rule_score{rule=~"${matcher}"}[5m]))`;
 };
 
-const buildAlertExport = (detail: SelectionDetail | null, options: ResolvedOptions, bucketSpanLabel: string, registeredRules: ScoreFeedRule[]): string => {
+const getAlertQueryLanguage = (registeredRules: ScoreFeedRule[]): string => {
+  if (registeredRules.length === 0) {
+    return 'query';
+  }
+
+  const languages = Array.from(new Set(registeredRules.map((rule) => rule.queryLanguage).filter((value): value is string => Boolean(value))));
+  if (languages.length === 1) {
+    return languages[0];
+  }
+
+  if (registeredRules.every(isPrometheusFeedRule)) {
+    return 'PromQL';
+  }
+
+  return 'target-specific query';
+};
+
+const SCORE_FEED_TARGET_VALUES: ScoreFeedTarget[] = ['prometheus', 'loki', 'influxdb', 'postgresql', 'clickhouse', 'elasticsearch'];
+
+const normalizeScoreFeedTarget = (target?: ScoreFeedTarget | string): ScoreFeedTarget => {
+  const normalized = String(target ?? '').toLowerCase();
+  return SCORE_FEED_TARGET_VALUES.includes(normalized as ScoreFeedTarget) ? (normalized as ScoreFeedTarget) : 'prometheus';
+};
+
+const getAlertQueryTargetLabel = (rule: ScoreFeedRule | ScoreFeedQueryVariant): string => {
+  const target = normalizeScoreFeedTarget(rule.target);
+  const targetLabel = SCORE_FEED_TARGET_LABELS[target];
+  return `${targetLabel}${rule.queryLanguage ? ` (${rule.queryLanguage})` : ''}`;
+};
+
+const buildAlertRuleLabels = (dashboardUid: string, panelId: number, target: ScoreFeedTarget | string): Record<string, string> => ({
+  alert_family: 'anomaly_detector',
+  severity: 'major',
+  dashboard_uid: dashboardUid || 'unsaved_dashboard',
+  panel_id: panelId > 0 ? String(panelId) : 'unknown_panel',
+  score_target: normalizeScoreFeedTarget(target),
+});
+
+const buildAlertRuleDescription = (detail: SelectionDetail | null, panelTitle: string): string => {
+  if (!detail) {
+    return `Anomaly score alert for ${panelTitle}.`;
+  }
+
+  if (detail.kind === 'point') {
+    return `${detail.title}. Raw detection score ${formatValue(detail.score)}; alert score ${detail.severityScore}/100 (${SEVERITY_LABELS[detail.severityLabel]}). Current ${formatValue(detail.actual)} vs expected ${formatValue(detail.expected)}.`;
+  }
+
+  return `${detail.title}. Raw detection score ${formatValue(detail.score)} across ${detail.activeSeries} active series; alert score ${detail.severityScore}/100 (${SEVERITY_LABELS[detail.severityLabel]}): ${detail.contributors.slice(0, 4).join(', ')}.`;
+};
+
+const buildAlertRuleAnnotations = (detail: SelectionDetail | null, draft: Pick<AlertRuleDraftContext, 'dashboardUid' | 'folderTitle' | 'dashboardTitle' | 'panelId' | 'panelTitle' | 'ruleName'>): Record<string, string> => ({
+  summary: detail ? detail.title : draft.ruleName,
+  description: buildAlertRuleDescription(detail, draft.panelTitle),
+  folder_title: draft.folderTitle ?? '',
+  dashboard_title: draft.dashboardTitle,
+  panel_title: draft.panelTitle,
+  __dashboardUid__: draft.dashboardUid,
+  __panelId__: draft.panelId > 0 ? String(draft.panelId) : '',
+});
+
+const buildAlertExport = (
+  detail: SelectionDetail | null,
+  options: ResolvedOptions,
+  bucketSpanLabel: string,
+  registeredRules: ScoreFeedRule[],
+  draft: AlertRuleDraftContext
+): string => {
   const threshold = getRecommendedAlertThreshold(options.severityPreset);
-  const alertQuery = buildAlertPromQuery(registeredRules);
+  const alertQuery = buildAlertQuery(registeredRules);
+  const queryLanguage = getAlertQueryLanguage(registeredRules);
 
   return JSON.stringify(
     {
-      title: detail ? detail.title : 'Anomaly detector score alert',
+      title: draft.ruleName,
+      folder_name: draft.folderTitle ?? '',
+      dashboard_name: draft.dashboardTitle,
+      dashboard_uid: draft.dashboardUid,
+      panel_title: draft.panelTitle,
+      panel_id: draft.panelId,
       score_feed_ready: registeredRules.length > 0,
-      paste_into: 'Grafana Alerting query editor',
-      prometheus_query: alertQuery || 'Sync Prometheus score feed first to generate an alert-ready score query.',
-      grafana_condition: alertQuery ? `WHEN QUERY IS ABOVE ${threshold}` : 'Sync Prometheus score feed first',
-      for: '2m',
-      evaluate_every: '30s',
-      no_data_state: 'NoData',
-      exec_err_state: 'Alerting',
+      paste_into: `Grafana Alerting query editor (${queryLanguage})`,
+      query_language: queryLanguage,
+      alert_query: alertQuery || 'Sync anomaly score feed first to generate an alert-ready score query.',
+      grafana_condition: alertQuery ? `WHEN QUERY IS ABOVE ${threshold}` : 'Sync anomaly score feed first',
+      for: '10m',
+      evaluate_every: '3m',
+      no_data_state: 'Alerting',
+      exec_err_state: 'Error',
       threshold,
-      synced_rules: registeredRules.map((rule) => rule.rule),
+      suggested_labels: draft.labels,
+      suggested_label_pairs: formatLabelPairs(draft.labels),
+      suggested_annotations: draft.annotations,
+      synced_rules: registeredRules.map((rule) => ({
+        rule: rule.rule,
+        target: rule.target ?? 'prometheus',
+        query_language: rule.queryLanguage ?? queryLanguage,
+        datasource_type: rule.datasourceType ?? '',
+        query: rule.query,
+        per_series_query: rule.perSeriesQuery,
+        query_variants: rule.queryVariants ?? [],
+      })),
       rule_scope: registeredRules.length > 1 ? 'Combined max across synced panel rules' : 'Single synced panel rule',
       mode: options.detectionMode,
       algorithm: options.algorithm,
@@ -2858,6 +3653,10 @@ const buildAlertExport = (detail: SelectionDetail | null, options: ResolvedOptio
       severity_preset: options.severityPreset,
       selected_severity: detail ? detail.severityLabel : 'normal',
       selected_score: detail ? detail.score : 0,
+      selected_raw_score: detail ? detail.score : 0,
+      selected_alarm_score_0_100: detail ? detail.severityScore : 0,
+      selected_alarm_severity: detail ? detail.severityLabel : 'normal',
+      score_scale_note: 'Alert queries use the normalized 0-100 alarm score, not the raw detection score.',
       selected_confidence: detail ? detail.confidenceLabel : 'low',
       selected_confidence_score: detail ? detail.confidenceScore : 0,
       selected_data_quality: detail ? detail.dataQualityLabel : 'thin',
@@ -2887,7 +3686,7 @@ const buildSelectedAnnotationPayload = (
     return null;
   }
 
-  const tags = ['anomaly-detector', detail.severityLabel, detail.confidenceLabel, detail.dataQualityLabel, slugifyTagValue(bucketSpanLabel), detail.kind];
+  const tags = uniqueTagValues(['anomaly-detector', detail.severityLabel, detail.confidenceLabel, detail.dataQualityLabel, slugifyTagValue(bucketSpanLabel), detail.kind]);
   const payload: GrafanaAnnotationPayload = {
     time: detail.bucketStart,
     tags,
@@ -2909,11 +3708,15 @@ const buildSelectedAnnotationPayload = (
   }
 
   if (detail.kind === 'point') {
-    tags.push(slugifyTagValue(detail.seriesLabel));
+    const seriesTag = slugifyTagValue(detail.seriesLabel);
+    if (!tags.includes(seriesTag)) {
+      tags.push(seriesTag);
+    }
     payload.text = [
       detail.title,
       `Window: ${formatBucketWindow(detail.bucketStart, detail.bucketEnd)}`,
-      `Score: ${formatValue(detail.score)} | Severity: ${SEVERITY_LABELS[detail.severityLabel]} ${detail.severityScore}`,
+      `Raw detection score: ${formatValue(detail.score)}`,
+      `Alert score (0-100): ${SEVERITY_LABELS[detail.severityLabel]} ${detail.severityScore}`,
       `Confidence: ${CONFIDENCE_LABELS[detail.confidenceLabel]} (${formatValue(detail.confidenceScore)})`,
       `Data quality: ${DATA_QUALITY_LABELS[detail.dataQualityLabel]}`,
       `Actual: ${formatValue(detail.actual)} | Expected: ${formatValue(detail.expected)}`,
@@ -2926,7 +3729,8 @@ const buildSelectedAnnotationPayload = (
   payload.text = [
     detail.title,
     `Window: ${formatBucketWindow(detail.bucketStart, detail.bucketEnd)}`,
-    `Score: ${formatValue(detail.score)} | Severity: ${SEVERITY_LABELS[detail.severityLabel]} ${detail.severityScore}`,
+    `Raw detection score: ${formatValue(detail.score)}`,
+    `Alert score (0-100): ${SEVERITY_LABELS[detail.severityLabel]} ${detail.severityScore}`,
     `Confidence: ${CONFIDENCE_LABELS[detail.confidenceLabel]} (${formatValue(detail.confidenceScore)})`,
     `Data quality: ${DATA_QUALITY_LABELS[detail.dataQualityLabel]}`,
     `Active series: ${detail.activeSeries}`,
@@ -2937,8 +3741,19 @@ const buildSelectedAnnotationPayload = (
 
 const copyTextToClipboard = async (value: string): Promise<void> => {
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+    try {
+      await Promise.race([
+        navigator.clipboard.writeText(value),
+        new Promise<never>((_, reject) => {
+          const setTimer = typeof window !== 'undefined' ? window.setTimeout : setTimeout;
+          setTimer(() => reject(new Error('Clipboard API timed out.')), 900);
+        }),
+      ]);
+      return;
+    } catch {
+      // Grafana panels often run inside iframes where Clipboard API can be denied or hang.
+      // Fall through to the textarea copy path so inspector actions still give feedback.
+    }
   }
 
   if (typeof document === 'undefined') {
@@ -3000,10 +3815,126 @@ const SCORE_FEED_MODE_LABELS: Record<ScoreFeedMode, string> = {
   auto: 'Auto sync',
 };
 
+const SCORE_FEED_TARGET_LABELS: Record<ScoreFeedTarget, string> = {
+  prometheus: 'Prometheus metrics',
+  loki: 'Loki',
+  influxdb: 'InfluxDB',
+  postgresql: 'PostgreSQL',
+  clickhouse: 'ClickHouse',
+  elasticsearch: 'Elasticsearch',
+};
+
+const SCORE_FEED_TARGET_SHORT_LABELS: Record<ScoreFeedTarget, string> = {
+  prometheus: 'Prometheus',
+  loki: 'Loki',
+  influxdb: 'InfluxDB',
+  postgresql: 'PostgreSQL',
+  clickhouse: 'ClickHouse',
+  elasticsearch: 'Elastic',
+};
+
+const SCORE_FEED_TARGET_COLORS: Record<ScoreFeedTarget, string> = {
+  prometheus: '#94A3B8',
+  loki: '#F59E0B',
+  influxdb: '#3B82F6',
+  postgresql: '#60A5FA',
+  clickhouse: '#FACC15',
+  elasticsearch: '#22D3EE',
+};
+
+const getScoreFeedTargetShortLabel = (target?: ScoreFeedTarget | string): string => {
+  return SCORE_FEED_TARGET_SHORT_LABELS[normalizeScoreFeedTarget(target)];
+};
+
+const ScoreFeedTargetIcon = ({ target }: { target?: ScoreFeedTarget | string }): React.ReactElement => {
+  switch (normalizeScoreFeedTarget(target)) {
+    case 'loki':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M7 20V7.6l3.3-.9V20H7Z" fill="#D97706" />
+          <path d="M11.3 20V3.8l3.4-.9V20h-3.4Z" fill="#F59E0B" />
+          <path d="M15.8 20V10.2l3.2-.86V20h-3.2Z" fill="#FBBF24" />
+          <path d="M5.2 20.4h15.1" stroke="#B45309" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      );
+    case 'influxdb':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 2.8 20 7.3v9.4l-8 4.5-8-4.5V7.3l8-4.5Z" fill="none" stroke="#3B82F6" strokeWidth="1.8" />
+          <path d="m12 2.8 3.9 7.1L12 21.2 8.1 9.9 12 2.8Z" fill="none" stroke="#60A5FA" strokeWidth="1.3" />
+          <path d="M4 7.3 12 12l8-4.7M4 16.7 12 12l8 4.7" fill="none" stroke="#2563EB" strokeWidth="1.2" />
+        </svg>
+      );
+    case 'postgresql':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path
+            d="M6.2 10.6c0-4.4 2.4-7 6.1-7 3.9 0 6.5 2.7 6.5 7 0 2.9-1.2 5.1-3.3 6.3l.3 3.1-2.9-1.8c-.8.15-1.7.15-2.6-.03L7.2 20l.43-3.35c-.95-.7-1.43-2.55-1.43-6.05Z"
+            fill="#3B82F6"
+            opacity="0.9"
+          />
+          <path d="M9 10.1c.45-.5 1.25-.5 1.7 0M14 10.1c.45-.5 1.25-.5 1.7 0" stroke="#DBEAFE" strokeWidth="1.2" strokeLinecap="round" />
+          <path d="M12.8 11.3c-.4 1.2-.15 2.1.75 2.7.85.6.95 1.55.15 2.45" fill="none" stroke="#DBEAFE" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+      );
+    case 'clickhouse':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 4h3v16H4V4Zm5 0h3v16H9V4Zm5 0h3v16h-3V4Z" fill="#FACC15" />
+          <path d="M19 4h1.8v16H19V4Z" fill="#EF4444" />
+        </svg>
+      );
+    case 'elasticsearch':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="9" cy="7" r="4" fill="#F59E0B" />
+          <circle cx="15.2" cy="7.7" r="3.3" fill="#22C55E" />
+          <circle cx="16.1" cy="14.8" r="4" fill="#06B6D4" />
+          <circle cx="8.2" cy="15.5" r="3.5" fill="#EF4444" />
+          <circle cx="12" cy="11.5" r="3.3" fill="#64748B" opacity="0.72" />
+        </svg>
+      );
+    case 'prometheus':
+    default:
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <ellipse cx="12" cy="5.4" rx="7.2" ry="3.1" fill="#64748B" />
+          <path d="M4.8 5.4v4.5c0 1.7 3.2 3.1 7.2 3.1s7.2-1.4 7.2-3.1V5.4" fill="#475569" />
+          <ellipse cx="12" cy="9.9" rx="7.2" ry="3.1" fill="#94A3B8" />
+          <path d="M4.8 9.9v4.5c0 1.7 3.2 3.1 7.2 3.1s7.2-1.4 7.2-3.1V9.9" fill="#475569" />
+          <ellipse cx="12" cy="14.4" rx="7.2" ry="3.1" fill="#CBD5E1" />
+        </svg>
+      );
+  }
+};
+
+const getScoreFeedTargetIcon = (target?: ScoreFeedTarget | string): React.ReactNode => {
+  return <ScoreFeedTargetIcon target={target} />;
+};
+
+const getScoreFeedTargetColor = (target?: ScoreFeedTarget | string): string => {
+  return SCORE_FEED_TARGET_COLORS[normalizeScoreFeedTarget(target)];
+};
+
 const normalizeScoreFeedEndpoint = (value?: string): string => {
   const trimmed = (value ?? DEFAULT_SCORE_FEED_ENDPOINT).trim();
   const normalized = trimmed.replace(/\/+$/, '');
   return normalized || DEFAULT_SCORE_FEED_ENDPOINT;
+};
+
+const sanitizeRuleName = (value: string): string => {
+  const sanitized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return sanitized || 'anomaly_panel';
+};
+
+const buildComputedRuleName = (panelTitle: string, prefix?: string): string => {
+  const base = sanitizeRuleName(panelTitle || 'anomaly_panel');
+  const normalizedPrefix = sanitizeRuleName(prefix ?? '');
+  return normalizedPrefix ? `${normalizedPrefix}_${base}` : base;
 };
 
 const getDashboardUidFromLocation = (): string => {
@@ -3020,23 +3951,72 @@ const inferDashboardTitle = (): string => {
     return '';
   }
 
-  return document.title.replace(/\s+-\s+Grafana$/i, '').trim();
+  return document.title
+    .replace(/\s+-\s+Grafana$/i, '')
+    .replace(/^View panel\s+-\s+/i, '')
+    .replace(/^Edit panel\s+-\s+/i, '')
+    .replace(/\s+-\s+Dashboards$/i, '')
+    .trim();
 };
 
-const extractDatasourceInfo = (value: unknown): { uid: string; type: string } => {
+const inferDashboardFolderTitle = (): string => {
+  if (typeof document === 'undefined') {
+    return '';
+  }
+
+  const breadcrumbs = Array.from(document.querySelectorAll('nav[aria-label="Breadcrumbs"] a'))
+    .map((item) => item.textContent?.trim() ?? '')
+    .filter(Boolean);
+
+  if (breadcrumbs.length >= 3 && breadcrumbs[0].toLowerCase() === 'dashboards') {
+    return breadcrumbs[1];
+  }
+
+  return '';
+};
+
+const buildAlertRuleDisplayName = (folderTitle: string, dashboardTitle: string, panelTitle: string): string => {
+  const cleanFolderTitle = folderTitle.trim();
+  let cleanDashboardTitle = dashboardTitle.trim();
+
+  if (cleanFolderTitle && cleanDashboardTitle.toLowerCase().endsWith(` - ${cleanFolderTitle}`.toLowerCase())) {
+    cleanDashboardTitle = cleanDashboardTitle.slice(0, cleanDashboardTitle.length - cleanFolderTitle.length - 3).trim();
+  }
+
+  return [cleanFolderTitle, cleanDashboardTitle, panelTitle.trim()]
+    .filter((value, index, values) => value.length > 0 && values.findIndex((candidate) => candidate === value) === index)
+    .join(' - ');
+};
+
+const extractDatasourceInfo = (value: unknown): { uid: string; type: string; url: string } => {
   if (typeof value === 'string') {
-    return { uid: value, type: '' };
+    return { uid: value, type: '', url: '' };
   }
 
   if (!value || typeof value !== 'object') {
-    return { uid: '', type: '' };
+    return { uid: '', type: '', url: '' };
   }
 
   const record = value as Record<string, unknown>;
   return {
     uid: String(record.uid ?? record.name ?? ''),
     type: String(record.type ?? ''),
+    url: String(record.url ?? ''),
   };
+};
+
+const normalizeDatasourceUrlForExporter = (url: string, datasourceType: string): string => {
+  const value = url.trim();
+  const type = datasourceType.trim().toLowerCase();
+  if (!value) {
+    return '';
+  }
+
+  if ((type === 'postgres' || type === 'postgresql' || type.includes('postgresql')) && !/^postgres(?:ql)?:\/\//i.test(value)) {
+    return '';
+  }
+
+  return value;
 };
 
 const extractPrometheusTargets = (targets: unknown[]): FeedQueryTarget[] => {
@@ -3051,20 +4031,25 @@ const extractPrometheusTargets = (targets: unknown[]): FeedQueryTarget[] => {
         return [];
       }
 
-      const expr = String(record.expr ?? record.expression ?? record.query ?? '').trim();
+      const datasource = extractDatasourceInfo(record.datasource);
+      const datasourceUid = String(record.datasourceUid ?? datasource.uid ?? '').trim();
+      const datasourceType = String(record.datasourceType ?? datasource.type ?? '').trim().toLowerCase();
+      const datasourceUrl = normalizeDatasourceUrlForExporter(String(record.datasourceUrl ?? record.url ?? datasource.url ?? '').trim(), datasourceType);
+      const rawExpr = String(record.expr ?? record.expression ?? record.query ?? record.rawSql ?? record.rawQuery ?? '').trim();
+      const expr =
+        datasourceType === 'elasticsearch' && (record.metrics || record.bucketAggs || record.timeField)
+          ? JSON.stringify({
+              query: rawExpr,
+              metrics: record.metrics ?? [],
+              bucketAggs: record.bucketAggs ?? [],
+              timeField: record.timeField ?? '@timestamp',
+            })
+          : rawExpr;
       if (!expr) {
         return [];
       }
 
-      const datasource = extractDatasourceInfo(record.datasource);
-      const datasourceUid = String(record.datasourceUid ?? datasource.uid ?? '').trim();
-      const datasourceType = String(record.datasourceType ?? datasource.type ?? '').trim().toLowerCase();
-
       if (datasourceUid === '__expr__' || datasourceType === '__expr__' || datasourceType === 'expression') {
-        return [];
-      }
-
-      if (datasourceType && datasourceType !== 'prometheus') {
         return [];
       }
 
@@ -3075,10 +4060,56 @@ const extractPrometheusTargets = (targets: unknown[]): FeedQueryTarget[] => {
           legend: String(record.legendFormat ?? record.legend ?? '').trim(),
           datasourceUid,
           datasourceType,
+          datasourceUrl,
         },
       ];
     })
     .filter((target, index, items) => items.findIndex((item) => item.refId === target.refId && item.expr === target.expr) === index);
+};
+
+const readGrafanaDatasourceUrl = async (uid: string, datasourceType: string): Promise<string> => {
+  if (!uid || uid === '__expr__' || typeof fetch === 'undefined') {
+    return '';
+  }
+
+  try {
+    const response = await fetch(`/api/datasources/uid/${encodeURIComponent(uid)}`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      return '';
+    }
+    const payload = (await response.json()) as { url?: unknown; type?: unknown };
+    return normalizeDatasourceUrlForExporter(String(payload.url ?? '').trim(), String(payload.type ?? datasourceType));
+  } catch {
+    return '';
+  }
+};
+
+const enrichTargetsWithDatasourceUrls = async (targets: FeedQueryTarget[]): Promise<FeedQueryTarget[]> => {
+  if (targets.length === 0) {
+    return targets;
+  }
+
+  const datasourceKeys = Array.from(
+    new Set(
+      targets
+        .filter((target) => !target.datasourceUrl && target.datasourceUid)
+        .map((target) => `${target.datasourceUid}:::${target.datasourceType}`)
+    )
+  );
+  const urlEntries = await Promise.all(
+    datasourceKeys.map(async (key) => {
+      const [uid, datasourceType] = key.split(':::');
+      return [uid, await readGrafanaDatasourceUrl(uid, datasourceType)] as const;
+    })
+  );
+  const urlByUid = new Map(urlEntries);
+
+  return targets.map((target) => ({
+    ...target,
+    datasourceUrl: target.datasourceUrl || urlByUid.get(target.datasourceUid) || '',
+  }));
 };
 
 const flattenPanels = (items: unknown[]): Array<Record<string, unknown>> => {
@@ -3102,19 +4133,18 @@ const flattenPanels = (items: unknown[]): Array<Record<string, unknown>> => {
   return flattened;
 };
 
-const buildLiveSyncContext = (panelId: number, panelTitle: string, liveTargets: FeedQueryTarget[]): PanelSyncContext | null => {
-  if (liveTargets.length === 0) {
-    return null;
-  }
-
+const buildLiveSyncContext = (panelId: number, panelTitle: string, liveTargets: FeedQueryTarget[], rangeSeconds: number, stepSeconds: number): PanelSyncContext => {
   const dashboardUid = getDashboardUidFromLocation() || 'local_dashboard';
   return {
     source: 'live',
     dashboardUid,
+    folderTitle: inferDashboardFolderTitle(),
     dashboardTitle: inferDashboardTitle() || 'Grafana dashboard',
     panelTitle,
     targets: liveTargets,
     panelOptions: {},
+    rangeSeconds,
+    stepSeconds,
   };
 };
 
@@ -3134,18 +4164,21 @@ const loadSavedSyncContext = async (panelId: number, fallbackTitle: string): Pro
 
   const payload = (await response.json()) as {
     dashboard?: { title?: unknown; panels?: unknown[] };
+    meta?: { folderTitle?: unknown };
   };
   const dashboard = payload.dashboard ?? {};
+  const folderTitle = String(payload.meta?.folderTitle ?? inferDashboardFolderTitle() ?? '').trim();
   const savedPanels = flattenPanels(Array.isArray(dashboard.panels) ? dashboard.panels : []);
   const panel = savedPanels.find((item) => Number(item.id ?? -1) === panelId);
   if (!panel) {
     return null;
   }
 
-  const targets = extractPrometheusTargets(Array.isArray(panel.targets) ? panel.targets : []);
+  const targets = await enrichTargetsWithDatasourceUrls(extractPrometheusTargets(Array.isArray(panel.targets) ? panel.targets : []));
   return {
     source: 'saved',
     dashboardUid,
+    folderTitle,
     dashboardTitle: String(dashboard.title ?? inferDashboardTitle() ?? dashboardUid).trim() || dashboardUid,
     panelTitle: String(panel.title ?? fallbackTitle).trim() || fallbackTitle,
     targets,
@@ -3166,18 +4199,23 @@ const buildMetricHintNames = (metricNames: string[], targets: FeedQueryTarget[])
 const buildScoreFeedSyncHash = (
   context: PanelSyncContext,
   resolvedOptions: ResolvedOptions,
-  ruleNamePrefix: string
+  ruleNamePrefix: string,
+  target: ScoreFeedTarget
 ): string => {
   return JSON.stringify({
     dashboardUid: context.dashboardUid,
     panelTitle: context.panelTitle,
     source: context.source,
     ruleNamePrefix,
+    target,
+    rangeSeconds: context.rangeSeconds ?? 0,
+    stepSeconds: context.stepSeconds ?? 0,
     targets: context.targets.map((target) => ({
       refId: target.refId,
       expr: target.expr,
       datasourceUid: target.datasourceUid,
       datasourceType: target.datasourceType,
+      datasourceUrl: target.datasourceUrl ?? '',
     })),
     resolvedOptions: {
       setupMode: resolvedOptions.setupMode,
@@ -3194,11 +4232,166 @@ const buildScoreFeedSyncHash = (
   });
 };
 
+const bucketSpanToSeconds = (bucketSpan: BucketSpan): number => {
+  switch (bucketSpan) {
+    case '1m':
+      return 60;
+    case '5m':
+      return 300;
+    case '15m':
+      return 900;
+    case '1h':
+      return 3600;
+    case 'raw':
+    case 'auto':
+    default:
+      return 0;
+  }
+};
+
+const buildPanelScoreFeedRegistrationPayload = (
+  context: PanelSyncContext,
+  panelId: number,
+  ruleNamePrefix: string,
+  target: ScoreFeedTarget,
+  resolvedOptions: ResolvedOptions,
+  syncHash: string
+): PanelScoreFeedRegistrationPayload | null => {
+  const validTargets = context.targets.filter((item) => item.expr.trim().length > 0);
+  if (validTargets.length === 0) {
+    return null;
+  }
+
+  const bucketSpanSeconds = bucketSpanToSeconds(resolvedOptions.bucketSpan);
+  const contextStepSeconds = Math.max(0, Math.round(context.stepSeconds ?? 0));
+  const stepSeconds = contextStepSeconds > 0 ? contextStepSeconds : bucketSpanSeconds > 0 ? Math.max(5, Math.min(bucketSpanSeconds, 60)) : 30;
+  const historyPoints = Math.max(256, resolvedOptions.baselineWindow * Math.max(resolvedOptions.seasonalitySamples, 1) + 8, resolvedOptions.baselineWindow * 6);
+  const panelRangeSeconds = Math.max(0, Math.round(context.rangeSeconds ?? 0));
+  const fallbackRangeSeconds = Math.max(3600, historyPoints * stepSeconds);
+
+  return {
+    dashboardUid: context.dashboardUid,
+    folderTitle: context.folderTitle,
+    dashboardTitle: context.dashboardTitle,
+    panelId,
+    panelTitle: context.panelTitle,
+    ruleNamePrefix: buildComputedRuleName(context.panelTitle, ruleNamePrefix),
+    target,
+    source: context.source,
+    syncHash,
+    targets: validTargets.map((item) => ({
+      refId: item.refId,
+      expr: item.expr,
+      legend: item.legend,
+      datasourceUid: item.datasourceUid,
+      datasourceType: item.datasourceType,
+      datasourceUrl: item.datasourceUrl ?? '',
+    })),
+    resolvedOptions: {
+      setupMode: resolvedOptions.setupMode,
+      metricPreset: resolvedOptions.metricPreset,
+      effectiveMetricPreset: resolvedOptions.effectiveMetricPreset,
+      detectionMode: resolvedOptions.detectionMode,
+      algorithm: resolvedOptions.algorithm,
+      sensitivity: resolvedOptions.sensitivity,
+      baselineWindow: resolvedOptions.baselineWindow,
+      seasonalitySamples: resolvedOptions.seasonalitySamples,
+      seasonalRefinement: resolvedOptions.seasonalRefinement,
+      severityPreset: resolvedOptions.severityPreset,
+      rangeSeconds: panelRangeSeconds > 0 ? Math.max(stepSeconds * 4, panelRangeSeconds) : fallbackRangeSeconds,
+      stepSeconds,
+      bucketSpanSeconds,
+    },
+  };
+};
+
+const buildComputedScoreFeedPayload = (
+  context: PanelSyncContext,
+  panelId: number,
+  ruleNamePrefix: string,
+  target: ScoreFeedTarget,
+  resolvedOptions: ResolvedOptions,
+  analyses: SeriesAnalysis[]
+): ComputedScoreFeedPayload | null => {
+  const series = analyses.flatMap<ComputedScoreFeedSeriesPayload>((analysis) => {
+    const point = [...analysis.allPoints].reverse().find((candidate) => candidate.expected !== null) ?? analysis.allPoints[analysis.allPoints.length - 1];
+    if (!point) {
+      return [];
+    }
+
+    return [
+      {
+        key: analysis.key,
+        label: analysis.label,
+        timestamp: point.time / 1000,
+        value: point.value,
+        expected: point.expected,
+        lower: point.lower,
+        upper: point.upper,
+        deviation: point.expected === null ? null : point.value - point.expected,
+        rawScore: point.score,
+        pointRawScore: point.pointScore,
+        windowRawScore: point.windowScore,
+        scoreDriver: point.scoreDriver,
+        normalizedScore: point.severityScore,
+        severityLabel: point.severityLabel,
+        isAnomaly: point.isAnomaly,
+        confidenceScore: point.confidenceScore,
+        confidenceLabel: point.confidenceLabel,
+        dataQualityLabel: point.dataQualityLabel,
+        threshold: resolvedOptions.sensitivity,
+      },
+    ];
+  });
+
+  if (series.length === 0) {
+    return null;
+  }
+
+  const ordered = [...series].sort((left, right) => right.normalizedScore - left.normalizedScore);
+  const top = ordered[0];
+  const sourceDatasources = Array.from(
+    new Map(
+      context.targets.map((item) => [
+        `${item.datasourceUid || 'unknown'}:${item.datasourceType || 'unknown'}`,
+        { uid: item.datasourceUid || 'unknown', type: item.datasourceType || 'unknown' },
+      ])
+    ).values()
+  );
+
+  return {
+    dashboardUid: context.dashboardUid,
+    folderTitle: context.folderTitle,
+    dashboardTitle: context.dashboardTitle,
+    panelId,
+    panelTitle: context.panelTitle,
+    ruleName: buildComputedRuleName(context.panelTitle, ruleNamePrefix),
+    target,
+    source: context.source,
+    sourceDatasources,
+    series,
+    rule: {
+      timestamp: Math.max(...series.map((item) => item.timestamp)),
+      score: top.normalizedScore,
+      rawScore: top.rawScore,
+      breachCount: series.filter((item) => item.isAnomaly).length,
+      seriesCount: series.length,
+      activeSeries: series.length,
+      severityLabel: top.severityLabel,
+    },
+    resolvedOptions: {
+      algorithm: resolvedOptions.algorithm,
+      severityPreset: resolvedOptions.severityPreset,
+      sensitivity: resolvedOptions.sensitivity,
+    },
+  };
+};
+
 const buildInitialScoreFeedState = (mode: ScoreFeedMode): ScoreFeedState => {
   if (mode === 'off') {
     return {
       kind: 'off',
-      message: 'Prometheus score feed is turned off for this panel.',
+      message: 'Anomaly score feed is turned off for this panel.',
       source: null,
       registered: [],
       removed: [],
@@ -3210,7 +4403,7 @@ const buildInitialScoreFeedState = (mode: ScoreFeedMode): ScoreFeedState => {
   if (mode === 'manual') {
     return {
       kind: 'idle',
-      message: 'Manual sync is ready. Use the button to publish alert-ready anomaly score rules for this panel.',
+      message: 'Manual sync is ready. Use the button to publish plugin-computed anomaly scores for this panel.',
       source: null,
       registered: [],
       removed: [],
@@ -3221,7 +4414,7 @@ const buildInitialScoreFeedState = (mode: ScoreFeedMode): ScoreFeedState => {
 
   return {
     kind: 'idle',
-    message: 'Auto sync watches the saved dashboard definition and republishes Prometheus score rules shortly after you save.',
+    message: 'Auto sync watches this panel and republishes plugin-computed anomaly scores shortly after data is returned.',
     source: null,
     registered: [],
     removed: [],
@@ -3239,6 +4432,13 @@ const buildUnsupportedScoreFeedState = (message: string): ScoreFeedState => ({
   lastSyncedAt: null,
   syncHash: '',
 });
+
+const mergeScoreFeedRules = (base: ScoreFeedRule[], overrides: ScoreFeedRule[]): ScoreFeedRule[] => {
+  const merged = new Map<string, ScoreFeedRule>();
+  base.forEach((rule) => merged.set(`${rule.rule}:${rule.target ?? ''}`, rule));
+  overrides.forEach((rule) => merged.set(`${rule.rule}:${rule.target ?? ''}`, rule));
+  return Array.from(merged.values());
+};
 
 const getScoreFeedStatusLabel = (kind: ScoreFeedStatusKind): string => {
   switch (kind) {
@@ -3284,13 +4484,20 @@ const formatSyncMoment = (timestamp: number | null): string => {
   return new Date(timestamp).toLocaleString();
 };
 
+const isPanelDataLoading = (state: unknown): boolean => {
+  const value = String(state ?? '').toLowerCase();
+  return value.includes('loading') || value.includes('streaming') || value.includes('notstarted');
+};
+
 const useScoreFeedSync = ({
   panelId,
   panelTitle,
   options,
   resolvedOptions,
-  metricNames,
   liveTargets,
+  analyses,
+  timeRangeSeconds,
+  queryStepSeconds,
 }: ScoreFeedHookInput): ScoreFeedController => {
   const [state, setState] = useState<ScoreFeedState>(() => buildInitialScoreFeedState(options.scoreFeedMode ?? 'auto'));
   const [lastSyncedHash, setLastSyncedHash] = useState('');
@@ -3304,60 +4511,52 @@ const useScoreFeedSync = ({
       }
 
       try {
-        let context: PanelSyncContext | null = null;
+        let context = buildLiveSyncContext(panelId, panelTitle, liveTargets, timeRangeSeconds, queryStepSeconds);
         let effectivePanelOptions = options;
-        let effectiveResolvedOptions = resolvedOptions;
         let endpoint = normalizeScoreFeedEndpoint(options.scoreFeedEndpoint);
 
         if (trigger === 'auto') {
-          context = await loadSavedSyncContext(panelId, panelTitle);
-          if (!context) {
-            setState({
-              ...buildInitialScoreFeedState('auto'),
-              message: 'Save the dashboard once to let auto sync publish Prometheus score rules for this panel.',
-            });
-            return;
+          const savedContext = await loadSavedSyncContext(panelId, panelTitle).catch(() => null);
+          if (savedContext) {
+            effectivePanelOptions = { ...options, ...savedContext.panelOptions };
+            context = {
+              ...savedContext,
+              targets: liveTargets.length > 0 ? liveTargets : savedContext.targets,
+              source: liveTargets.length > 0 ? 'live' : savedContext.source,
+              rangeSeconds: timeRangeSeconds,
+              stepSeconds: queryStepSeconds,
+            };
+            endpoint = normalizeScoreFeedEndpoint(effectivePanelOptions.scoreFeedEndpoint);
           }
-
-          effectivePanelOptions = { ...options, ...context.panelOptions };
-          if ((effectivePanelOptions.scoreFeedMode ?? 'off') !== 'auto') {
-            setState({
-              ...buildInitialScoreFeedState('auto'),
-              message: 'The saved dashboard version is not in Auto sync mode yet. Save the dashboard to activate automatic score feed publishing.',
-            });
-            return;
-          }
-
-          if (context.targets.length === 0) {
-            setState(buildUnsupportedScoreFeedState('The saved panel does not have a Prometheus query target yet. Save a Prometheus query first.'));
-            return;
-          }
-
-          const metricHints = buildMetricHintNames(metricNames, context.targets);
-          effectiveResolvedOptions = resolveOptions(effectivePanelOptions, metricHints);
-          endpoint = normalizeScoreFeedEndpoint(effectivePanelOptions.scoreFeedEndpoint);
-        } else {
-          context = buildLiveSyncContext(panelId, panelTitle, liveTargets);
-          if (!context) {
-            context = await loadSavedSyncContext(panelId, panelTitle);
-          }
-
-          if (!context) {
-            setState(buildUnsupportedScoreFeedState('No Prometheus query targets were found for this panel yet. Add a Prometheus query and refresh the panel first.'));
-            return;
-          }
-
-          if (context.targets.length === 0) {
-            setState(buildUnsupportedScoreFeedState('This panel does not currently expose a Prometheus query target to sync.'));
-            return;
-          }
-
-          const metricHints = buildMetricHintNames(metricNames, context.targets);
-          effectiveResolvedOptions = resolveOptions(options, metricHints);
         }
 
         const ruleNamePrefix = (trigger === 'auto' ? effectivePanelOptions.scoreFeedRuleNamePrefix : options.scoreFeedRuleNamePrefix) ?? '';
-        const syncHash = buildScoreFeedSyncHash(context, effectiveResolvedOptions, ruleNamePrefix);
+        const target = normalizeScoreFeedTarget(trigger === 'auto' ? effectivePanelOptions.scoreFeedTarget : options.scoreFeedTarget);
+        context = {
+          ...context,
+          targets: await enrichTargetsWithDatasourceUrls(context.targets),
+          rangeSeconds: timeRangeSeconds,
+          stepSeconds: queryStepSeconds,
+        };
+        const registrationHash = buildScoreFeedSyncHash(context, resolvedOptions, ruleNamePrefix, target);
+        const registrationPayload = buildPanelScoreFeedRegistrationPayload(context, panelId, ruleNamePrefix, target, resolvedOptions, registrationHash);
+        const payload = buildComputedScoreFeedPayload(context, panelId, ruleNamePrefix, target, resolvedOptions, analyses);
+
+        if (!registrationPayload && !payload) {
+          setState(buildUnsupportedScoreFeedState('This panel has no query target or computed anomaly score points to publish yet. Refresh the panel after data is returned.'));
+          return;
+        }
+
+        const syncHash = JSON.stringify({
+          registrationHash,
+          target,
+          ruleName: payload?.ruleName ?? registrationPayload?.ruleNamePrefix ?? '',
+          ruleScore: payload?.rule.score ?? null,
+          ruleTimestamp: payload?.rule.timestamp ?? null,
+          series: payload?.series.map((item) => [item.key, item.timestamp, item.normalizedScore, item.isAnomaly]) ?? [],
+          algorithm: resolvedOptions.algorithm,
+          severityPreset: resolvedOptions.severityPreset,
+        });
 
         if (trigger === 'auto' && syncHash === lastSyncedHash) {
           setState((current) => ({
@@ -3366,7 +4565,7 @@ const useScoreFeedSync = ({
             message:
               current.lastSyncedAt !== null
                 ? current.message
-                : 'Auto sync is active and watching the saved dashboard definition. Save the dashboard to publish future target changes.',
+                : `Auto sync is active. Latest plugin-computed scores are published to ${SCORE_FEED_TARGET_LABELS[target]}.`,
             source: context.source,
             syncHash,
           }));
@@ -3378,64 +4577,91 @@ const useScoreFeedSync = ({
           kind: 'syncing',
           message:
             trigger === 'auto'
-              ? 'Saving changes detected. Publishing updated Prometheus score rules from the saved dashboard definition.'
-              : 'Publishing Prometheus anomaly score rules for this panel.',
+              ? `Registering panel score feed and publishing latest scores to ${SCORE_FEED_TARGET_LABELS[target]}.`
+              : `Registering panel score feed and publishing scores to ${SCORE_FEED_TARGET_LABELS[target]}.`,
           source: context?.source ?? current.source,
         }));
 
-        const response = await fetch(`${endpoint}/api/sync/panel`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            dashboardUid: context.dashboardUid,
-            dashboardTitle: context.dashboardTitle,
-            panelId,
-            panelTitle: context.panelTitle,
-            ruleNamePrefix,
-            syncHash,
-            targets: context.targets,
-            resolvedOptions: {
-              setupMode: effectiveResolvedOptions.setupMode,
-              metricPreset: effectiveResolvedOptions.metricPreset,
-              effectiveMetricPreset: effectiveResolvedOptions.effectiveMetricPreset,
-              detectionMode: effectiveResolvedOptions.detectionMode,
-              algorithm: effectiveResolvedOptions.algorithm,
-              sensitivity: effectiveResolvedOptions.sensitivity,
-              baselineWindow: effectiveResolvedOptions.baselineWindow,
-              seasonalitySamples: effectiveResolvedOptions.seasonalitySamples,
-              seasonalRefinement: effectiveResolvedOptions.seasonalRefinement,
-              severityPreset: effectiveResolvedOptions.severityPreset,
-            },
-          }),
-        });
-
-        const payload = (await response.json()) as {
+        let registrationResponsePayload: {
           error?: string;
           registered?: ScoreFeedRule[];
           removed?: string[];
-          evaluationIntervalSeconds?: number;
-        };
+          target?: ScoreFeedTarget;
+        } = {};
 
-        if (!response.ok) {
-          throw new Error(payload.error || `Sync failed with status ${response.status}.`);
+        if (registrationPayload) {
+          const registrationResponse = await fetch(`${endpoint}/api/sync/panel`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(registrationPayload),
+          });
+
+          registrationResponsePayload = (await registrationResponse.json()) as {
+            error?: string;
+            registered?: ScoreFeedRule[];
+            removed?: string[];
+            target?: ScoreFeedTarget;
+          };
+
+          if (!registrationResponse.ok) {
+            throw new Error(registrationResponsePayload.error || `Panel registration failed with status ${registrationResponse.status}.`);
+          }
         }
 
-        const registered = Array.isArray(payload.registered) ? payload.registered : [];
-        const removed = Array.isArray(payload.removed) ? payload.removed : [];
-        const evaluationInterval = Math.max(1, Math.round(payload.evaluationIntervalSeconds ?? 5));
+        let responsePayload: {
+          error?: string;
+          registered?: ScoreFeedRule[];
+          removed?: string[];
+          target?: ScoreFeedTarget;
+          acceptedSeries?: number;
+        } = {};
+
+        if (payload) {
+          const response = await fetch(`${endpoint}/api/feed/scores`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          responsePayload = (await response.json()) as {
+            error?: string;
+            registered?: ScoreFeedRule[];
+            removed?: string[];
+            target?: ScoreFeedTarget;
+            acceptedSeries?: number;
+          };
+
+          if (!response.ok) {
+            throw new Error(responsePayload.error || `Sync failed with status ${response.status}.`);
+          }
+        }
+
+        const registered = mergeScoreFeedRules(
+          Array.isArray(responsePayload.registered) ? responsePayload.registered : [],
+          Array.isArray(registrationResponsePayload.registered) ? registrationResponsePayload.registered : []
+        );
+        const removed = [
+          ...(Array.isArray(registrationResponsePayload.removed) ? registrationResponsePayload.removed : []),
+          ...(Array.isArray(responsePayload.removed) ? responsePayload.removed : []),
+        ];
         const sourceLabel = context.source === 'saved' ? 'saved dashboard' : 'live panel';
+        const acceptedSeries = Math.max(0, Math.round(responsePayload.acceptedSeries ?? payload?.series.length ?? registered.length));
 
         setLastSyncedHash(syncHash);
         setState({
           kind: 'synced',
           message:
             registered.length > 0
-              ? `Synced ${registered.length} alert-ready Prometheus score rule${registered.length === 1 ? '' : 's'} from the ${sourceLabel}. Metrics refresh about every ${evaluationInterval} seconds.`
+              ? payload
+                ? `Published ${acceptedSeries} plugin-computed score series and registered backend recompute from the ${sourceLabel} to ${SCORE_FEED_TARGET_LABELS[target]}.`
+                : `Registered backend recompute from the ${sourceLabel} to ${SCORE_FEED_TARGET_LABELS[target]}; scores will continue while the dashboard is closed.`
               : removed.length > 0
-                ? `Removed ${removed.length} previous score rule${removed.length === 1 ? '' : 's'} because this panel no longer exposes an active Prometheus target.`
-                : `Prometheus score feed is active for this panel. Metrics refresh about every ${evaluationInterval} seconds.`,
+                ? `Removed ${removed.length} previous score feed registration${removed.length === 1 ? '' : 's'} because this panel no longer exposes computed score data.`
+                : `Score feed is active for this panel and targets ${SCORE_FEED_TARGET_LABELS[target]}.`,
           source: context.source,
           registered,
           removed,
@@ -3450,7 +4676,7 @@ const useScoreFeedSync = ({
         }));
       }
     },
-    [liveTargets, lastSyncedHash, metricNames, options, panelId, panelTitle, resolvedOptions, scoreFeedMode]
+    [analyses, liveTargets, lastSyncedHash, options, panelId, panelTitle, queryStepSeconds, resolvedOptions, scoreFeedMode, timeRangeSeconds]
   );
 
   useEffect(() => {
@@ -3515,22 +4741,58 @@ const useScoreFeedSync = ({
 export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height, timeRange, timeZone }) => {
   const theme = useTheme2();
   const styles = getStyles(theme.isDark);
-  const preparedSeries = useMemo(() => collectPreparedSeries(data.series), [data.series]);
+  const incomingPreparedSeries = useMemo(() => collectPreparedSeries(data.series), [data.series]);
+  const isDataLoading = isPanelDataLoading(data.state);
+  const [stalePreparedSeries, setStalePreparedSeries] = useState<PreparedSeries[]>([]);
+  useEffect(() => {
+    if (incomingPreparedSeries.length === 0 || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setStalePreparedSeries(incomingPreparedSeries);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [incomingPreparedSeries]);
+  const preparedSeries = incomingPreparedSeries.length > 0 ? incomingPreparedSeries : isDataLoading ? stalePreparedSeries : incomingPreparedSeries;
+  const isUsingStaleData = isDataLoading && incomingPreparedSeries.length === 0 && stalePreparedSeries.length > 0;
+  const isInitialLoading = isDataLoading && preparedSeries.length === 0;
   const metricLabels = useMemo(() => preparedSeries.map((series) => series.label), [preparedSeries]);
   const resolvedOptions = useMemo(() => resolveOptions(options, metricLabels), [options, metricLabels]);
+  const sectionVisibility = useMemo(() => resolveSectionVisibility(options), [options]);
+  const panelFallbackTitle = options.title || 'Anomaly detector';
   const dashboardUid = getDashboardUidFromLocation();
+  const [savedDashboardContext, setSavedDashboardContext] = useState<PanelSyncContext | null>(null);
   const liveTargets = useMemo(
     () => extractPrometheusTargets((((data as unknown as { request?: { targets?: unknown[] } }).request?.targets) ?? []) as unknown[]),
     [data]
   );
-  const scoreFeed = useScoreFeedSync({
-    panelId: id ?? 0,
-    panelTitle: options.title || 'Anomaly detector',
-    options,
-    resolvedOptions,
-    metricNames: metricLabels,
-    liveTargets,
-  });
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!dashboardUid) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    loadSavedSyncContext(id ?? 0, panelFallbackTitle)
+      .then((context) => {
+        if (!cancelled) {
+          setSavedDashboardContext(context);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSavedDashboardContext(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dashboardUid, id, panelFallbackTitle]);
   const { analyses, effectiveBucketSpanMs } = useMemo(
     () => buildAnalyses(preparedSeries, resolvedOptions),
     [preparedSeries, resolvedOptions]
@@ -3539,9 +4801,29 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     () => (resolvedOptions.detectionMode === 'multi' ? buildMultiMetricEvents(analyses, resolvedOptions) : []),
     [analyses, resolvedOptions]
   );
+  const panelTimeRangeSeconds = useMemo(() => {
+    const from = timeRange?.from?.valueOf?.() ?? 0;
+    const to = timeRange?.to?.valueOf?.() ?? 0;
+    return from > 0 && to > from ? Math.max(60, Math.round((to - from) / 1000)) : 0;
+  }, [timeRange]);
+  const panelQueryStepSeconds = useMemo(() => {
+    const request = (data as unknown as { request?: { intervalMs?: number } }).request;
+    const intervalMs = Number(request?.intervalMs ?? 0);
+    return Number.isFinite(intervalMs) && intervalMs > 0 ? Math.max(1, Math.round(intervalMs / 1000)) : 0;
+  }, [data]);
+  const scoreFeed = useScoreFeedSync({
+    panelId: id ?? 0,
+    panelTitle: panelFallbackTitle,
+    options,
+    resolvedOptions,
+    liveTargets,
+    analyses,
+    timeRangeSeconds: panelTimeRangeSeconds,
+    queryStepSeconds: panelQueryStepSeconds,
+  });
   const summaryItems = useMemo(
-    () => (options.showSummary === false ? [] : buildSummaryItems(analyses, events, resolvedOptions)),
-    [analyses, events, options.showSummary, resolvedOptions]
+    () => (sectionVisibility.anomalyFeed ? buildSummaryItems(analyses, events, resolvedOptions) : []),
+    [analyses, events, resolvedOptions, sectionVisibility.anomalyFeed]
   );
   const [selection, setSelection] = useState<SelectionToken | null>(null);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
@@ -3549,12 +4831,59 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const [actionToast, setActionToast] = useState<ActionToast | null>(null);
   const [scoreFeedExpanded, setScoreFeedExpanded] = useState(false);
   const [exportsExpanded, setExportsExpanded] = useState(false);
+  const chartCardRef = useRef<HTMLDivElement | null>(null);
+  const [chartFrame, setChartFrame] = useState<ChartFrame>({ width: 0, height: 0 });
   const activeSelection = useMemo(
     () => (selectionExists(selection, analyses, events) ? selection : summaryItems[0]?.selection ?? null),
     [analyses, events, selection, summaryItems]
   );
   const orderedSummaryItems = useMemo(() => [...summaryItems].sort((left, right) => left.time - right.time), [summaryItems]);
   const activeSelectionToken = selectionKey(activeSelection);
+
+  useLayoutEffect(() => {
+    const element = chartCardRef.current;
+    if (!element) {
+      return;
+    }
+
+    let frameHandle = 0;
+
+    const measure = () => {
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      window.cancelAnimationFrame(frameHandle);
+      frameHandle = window.requestAnimationFrame(() => {
+        const next: ChartFrame = {
+          width: Math.round(element.clientWidth),
+          height: Math.round(element.clientHeight),
+        };
+
+        setChartFrame((current) => (current.width === next.width && current.height === next.height ? current : next));
+      });
+    };
+
+    measure();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        measure();
+      });
+      resizeObserver.observe(element);
+    } else if (typeof window !== 'undefined') {
+      window.addEventListener('resize', measure);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.cancelAnimationFrame(frameHandle);
+        window.removeEventListener('resize', measure);
+      }
+      resizeObserver?.disconnect();
+    };
+  }, [width, height, sectionVisibility.inspector, sectionVisibility.mainChart]);
 
   useEffect(() => {
     if (!actionToast || typeof window === 'undefined') {
@@ -3570,7 +4899,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     };
   }, [actionToast]);
 
-  const selectSummaryItem = useCallback((item: SummaryItem | null) => {
+  const selectSummaryItem = (item: SummaryItem | null): void => {
     if (!item) {
       return;
     }
@@ -3578,24 +4907,59 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     setSelection(item.selection);
     setPinnedTime(item.time);
     setHoveredTime(item.time);
-  }, []);
+  };
 
-  const selectionDetail = useMemo(() => buildSelectionDetail(activeSelection, analyses, events), [activeSelection, analyses, events]);
+  const selectionDetail = useMemo(() => {
+    const detail = buildSelectionDetail(activeSelection, analyses, events);
+    if (detail) {
+      return detail;
+    }
+
+    const activeSummary = summaryItems.find((item) => selectionKey(item.selection) === activeSelectionToken) ?? summaryItems[0] ?? null;
+    return buildFallbackSelectionDetail(activeSummary);
+  }, [activeSelection, activeSelectionToken, analyses, events, summaryItems]);
   const allPoints = useMemo(() => analyses.flatMap((analysis) => analysis.allPoints), [analyses]);
   const interactionTime = pinnedTime ?? hoveredTime;
   const hoverSnapshot = useMemo(() => buildHoverSnapshot(interactionTime, analyses, events), [interactionTime, analyses, events]);
   const scoreFeedStatusColor = getScoreFeedStatusColor(scoreFeed.kind, theme.isDark);
+  const alertQueryLanguage = getAlertQueryLanguage(scoreFeed.registered);
+  const selectedScoreFeedTarget = normalizeScoreFeedTarget(scoreFeed.registered[0]?.target ?? options.scoreFeedTarget);
+  const selectedScoreFeedStatus =
+    scoreFeed.kind === 'error'
+      ? 'Error'
+      : scoreFeed.kind === 'syncing'
+      ? 'Syncing'
+      : scoreFeed.kind === 'synced'
+      ? 'Up'
+      : 'Ready';
+  const selectedScoreFeedStatusColor =
+    selectedScoreFeedStatus === 'Up'
+      ? '#22C55E'
+      : selectedScoreFeedStatus === 'Syncing'
+      ? '#60A5FA'
+      : selectedScoreFeedStatus === 'Error'
+      ? '#EF4444'
+      : '#F59E0B';
+  const selectedScoreFeedMeta =
+    selectedScoreFeedStatus === 'Up'
+      ? formatSyncMoment(scoreFeed.lastSyncedAt)
+      : selectedScoreFeedStatus === 'Syncing'
+      ? 'Publishing'
+      : selectedScoreFeedStatus === 'Error'
+      ? 'Check exporter'
+      : 'Selected target';
+  const scoreFeedHeadlineStatus = scoreFeed.kind === 'synced' ? `${getScoreFeedTargetShortLabel(selectedScoreFeedTarget)} healthy` : getScoreFeedStatusLabel(scoreFeed.kind);
   const scoreFeedCard =
     options.scoreFeedMode !== 'off' ? (
-      <div className={`${styles.card} ${styles.wideCard}`}>
+      <div className={`${styles.card} ${styles.scoreFeedCard}`}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ minWidth: 0, flex: '1 1 320px' }}>
-            <div className={styles.cardTitle}>Prometheus anomaly score feed</div>
+            <div className={styles.cardTitle}>Anomaly score feed</div>
             <div className={styles.subtitle}>{scoreFeed.message}</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span className={styles.recommendationBadge} style={{ background: `${scoreFeedStatusColor}22`, color: scoreFeedStatusColor }}>
-              {getScoreFeedStatusLabel(scoreFeed.kind)}
+              {scoreFeedHeadlineStatus}
             </span>
             <button
               type="button"
@@ -3619,15 +4983,56 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
             </button>
           </div>
         </div>
-        <div className={styles.detailGrid}>
-          <div className={styles.detailStat}><div className={styles.detailLabel}>Mode</div><div className={styles.detailValue}>{SCORE_FEED_MODE_LABELS[options.scoreFeedMode]}</div></div>
-          <div className={styles.detailStat}><div className={styles.detailLabel}>Rules</div><div className={styles.detailValue}>{scoreFeed.registered.length}</div></div>
-          <div className={styles.detailStat}><div className={styles.detailLabel}>Last sync</div><div className={styles.detailValue}>{formatSyncMoment(scoreFeed.lastSyncedAt)}</div></div>
-          <div className={styles.detailStat}><div className={styles.detailLabel}>Alert metrics</div><div className={styles.detailValue}>{scoreFeed.registered.length > 0 ? 'rule_score + confidence_score' : 'Waiting for sync'}</div></div>
+        <div className={styles.scoreFeedTargetGrid} aria-label="Score feed target health">
+          <div className={`${styles.healthChip} ${styles.healthChipCompact}`}>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 999,
+                background: selectedScoreFeedStatusColor,
+                boxShadow: `0 0 0 4px ${selectedScoreFeedStatusColor}1f`,
+              }}
+            />
+            <div className={styles.healthChipText}>
+              <span className={styles.healthChipLabel}>Status</span>
+              <span className={styles.healthChipValue}>{getScoreFeedStatusLabel(scoreFeed.kind)}</span>
+            </div>
+          </div>
+          <div className={`${styles.healthChip} ${styles.healthChipCompact}`}>
+            <div className={styles.healthChipText}>
+              <span className={styles.healthChipLabel}>Mode</span>
+              <span className={styles.healthChipValue}>{SCORE_FEED_MODE_LABELS[options.scoreFeedMode ?? 'auto']}</span>
+            </div>
+          </div>
+          <div className={`${styles.healthChip} ${styles.healthChipCompact}`}>
+            <div className={styles.scoreFeedTargetTop}>
+              <span className={styles.scoreFeedTargetIcon} style={{ color: getScoreFeedTargetColor(selectedScoreFeedTarget) }}>
+                {getScoreFeedTargetIcon(selectedScoreFeedTarget)}
+              </span>
+              <div className={styles.healthChipText}>
+                <span className={styles.scoreFeedTargetTitle}>{getScoreFeedTargetShortLabel(selectedScoreFeedTarget)}</span>
+                <span className={styles.scoreFeedTargetMeta}>Score target</span>
+              </div>
+            </div>
+          </div>
+          <div className={`${styles.healthChip} ${styles.healthChipCompact}`}>
+            <div className={styles.healthChipText}>
+              <span className={styles.healthChipLabel}>Last sync</span>
+              <span className={styles.healthChipValue}>{selectedScoreFeedMeta}</span>
+            </div>
+          </div>
+          <div className={`${styles.healthChip} ${styles.healthChipCompact}`}>
+            <div className={styles.healthChipText}>
+              <span className={styles.healthChipLabel}>Feed series</span>
+              <span className={styles.healthChipValue}>{scoreFeed.registered.length > 0 ? scoreFeed.registered.length : 'Waiting'}</span>
+            </div>
+          </div>
         </div>
         {scoreFeed.registered.length > 0 ? (
           <>
-            <div className={styles.subtitle}>Synced score rules are ready for alerting. Keep this collapsed during analysis, then expand only when you need the underlying PromQL.</div>
+            <div className={styles.subtitle}>Published score feed records are ready for alerting from the selected target. Queries below match the store selected in Score feed target.</div>
             <div className={styles.actionRow}>
               <button
                 type="button"
@@ -3641,11 +5046,60 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
               <div className={styles.feedRuleList}>
                 {scoreFeed.registered.map((item) => (
                   <div key={item.rule} className={styles.feedRuleCard}>
-                    <div className={styles.summaryTitle}>{item.rule}</div>
-                    <div className={styles.subtitle}>Alert rule query</div>
+                    <div className={styles.handoffHeader}>
+                      <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+                        <div className={styles.summaryTitle}>{item.rule}</div>
+                        <div className={styles.subtitle}>Alert rule query</div>
+                      </div>
+                      <span className={styles.targetBadge} title={getAlertQueryTargetLabel(item)}>
+                        <span className={styles.targetIcon}>{getScoreFeedTargetIcon(item.target ?? 'prometheus')}</span>
+                        <span className={styles.targetText}>
+                          <span className={styles.targetName}>{getScoreFeedTargetShortLabel(item.target ?? 'prometheus')}</span>
+                          <span className={styles.targetLanguage}>{item.queryLanguage ?? alertQueryLanguage}</span>
+                        </span>
+                      </span>
+                    </div>
                     <div className={styles.codeLine}>{item.query}</div>
                     <div className={styles.subtitle}>Per-series drilldown query</div>
                     <div className={styles.codeLine}>{item.perSeriesQuery}</div>
+                    {item.queryVariants && item.queryVariants.length > 0 ? (
+                      <div className={styles.feedRuleList}>
+                        {item.queryVariants.map((variant) => (
+                          <div key={`${item.rule}-${variant.target}-${variant.queryLanguage}`} className={styles.feedRuleCard}>
+                            <div className={styles.handoffHeader}>
+                              <div className={styles.subtitle}>Variant query</div>
+                              <span className={styles.targetBadge} title={getAlertQueryTargetLabel(variant)}>
+                                <span className={styles.targetIcon}>{getScoreFeedTargetIcon(variant.target)}</span>
+                                <span className={styles.targetText}>
+                                  <span className={styles.targetName}>{getScoreFeedTargetShortLabel(variant.target)}</span>
+                                  <span className={styles.targetLanguage}>{variant.queryLanguage}</span>
+                                </span>
+                              </span>
+                            </div>
+                            <div className={styles.codeLine}>{variant.query}</div>
+                            <div className={styles.codeLine}>{variant.perSeriesQuery}</div>
+                            <div className={styles.actionRow}>
+                              <button
+                                type="button"
+                                className={styles.actionButtonSecondary}
+                                onClick={() => {
+                                  void copyTextToClipboard(variant.query)
+                                    .then(() => setActionToast({ tone: 'success', message: `Copied ${getAlertQueryTargetLabel(variant)} query for ${item.rule}.` }))
+                                    .catch((error: unknown) =>
+                                      setActionToast({
+                                        tone: 'error',
+                                        message: error instanceof Error ? error.message : 'Failed to copy the target query.',
+                                      })
+                                    );
+                                }}
+                              >
+                                Copy variant query
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <div className={styles.actionRow}>
                       <button
                         type="button"
@@ -3689,10 +5143,26 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
       </div>
     ) : null;
 
+  if (isInitialLoading) {
+    return (
+      <div className={styles.wrapper}>
+        <div className={styles.skeletonShell} aria-label="Anomaly detector is loading">
+          <div className={`${styles.skeletonBlock} ${styles.skeletonHeader}`} />
+          <div className={`${styles.skeletonBlock} ${styles.skeletonChart}`} />
+          <div className={styles.skeletonRows}>
+            <div className={`${styles.skeletonBlock} ${styles.skeletonRow}`} />
+            <div className={`${styles.skeletonBlock} ${styles.skeletonRow}`} />
+            <div className={`${styles.skeletonBlock} ${styles.skeletonRow}`} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (preparedSeries.length === 0 || allPoints.length === 0) {
     return (
       <div className={styles.wrapper}>
-        {scoreFeedCard}
+        {sectionVisibility.scoreFeed ? scoreFeedCard : null}
         <div className={styles.emptyState}>Add a time series query with at least one numeric field to start anomaly analysis.</div>
       </div>
     );
@@ -3700,7 +5170,10 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
 
   const seriesCount = analyses.length;
   const anomalyCount = resolvedOptions.detectionMode === 'multi' ? events.filter((event) => event.isAnomaly).length : analyses.reduce((sum, analysis) => sum + analysis.anomalyCount, 0);
-  const peakScoreCandidates = resolvedOptions.detectionMode === 'multi' ? events.map((event) => event.score) : analyses.map((analysis) => analysis.maxScore);
+  const peakScoreCandidates =
+    resolvedOptions.detectionMode === 'multi'
+      ? events.map((event) => event.severityScore)
+      : analyses.map((analysis) => analysis.maxSeverityScore);
   const peakScore = Math.max(...peakScoreCandidates, 0);
   const peakSeverity = analyses.reduce<SeverityState>((current, analysis) => pickHigherSeverity(current, { severityLabel: analysis.maxSeverityLabel, severityScore: analysis.maxSeverityScore }), {
     severityLabel: 'normal',
@@ -3715,21 +5188,27 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const dataRangeMs = Math.max(maxTime - minTime, 1);
   const dashboardRangeMs = Math.max((timeRange.to?.valueOf?.() ?? maxTime) - (timeRange.from?.valueOf?.() ?? minTime), 1);
   const timeRangeMs = Math.max(dataRangeMs, dashboardRangeMs);
-  const minValue = Math.min(...allValues);
-  const maxValue = Math.max(...allValues);
-  const yPadding = Math.max((maxValue - minValue) * 0.12, Math.abs(maxValue) * 0.03, 1);
-  const domainMin = minValue - yPadding;
-  const domainMax = maxValue + yPadding;
+  const actualValues = allPoints.map((point) => point.value).filter(Number.isFinite);
+  const valueDomain = resolveValueDomain(allValues, actualValues);
+  const domainMin = valueDomain.min;
+  const domainMax = valueDomain.max;
   const timeZoneLabel = timeZoneAbbrevation(maxTime, { timeZone }) || (typeof timeZone === 'string' ? timeZone : 'local');
+  const peakSeverityColor = SEVERITY_COLORS[peakSeverity.severityLabel];
+  const showStatusHeader = sectionVisibility.initialLabels || sectionVisibility.statistics;
+  const showSideUtilities = sectionVisibility.detectionProfile || sectionVisibility.exports;
+  const showSecondaryDock = sectionVisibility.anomalyFeed || showSideUtilities;
+  const showBottomDock = sectionVisibility.seriesSummary || (sectionVisibility.scoreFeed && Boolean(scoreFeedCard));
 
-  const chartWidth = Math.max(width - 24, 320);
-  const chartHeight = Math.max(Math.min(options.showSummary === false ? height - 72 : height * 0.54, 500), 340);
+  const fallbackChartWidth = Math.max(width - 24, 320);
+  const fallbackChartHeight = Math.max(Math.min(showSecondaryDock ? height * 0.54 : height - 72, 500), 340);
+  const chartWidth = chartFrame.width > 0 ? Math.max(chartFrame.width, 260) : fallbackChartWidth;
+  const chartHeight = chartFrame.height > 0 ? Math.max(chartFrame.height, 220) : fallbackChartHeight;
   const chartPadding = {
     ...PADDING,
-    top: 24,
+    top: chartHeight < 280 ? 18 : 24,
     right: resolvedOptions.detectionMode === 'multi' ? 28 : 24,
-    bottom: 54,
-    left: resolvedOptions.detectionMode === 'multi' ? 92 : 84,
+    bottom: chartHeight < 280 ? 42 : 54,
+    left: resolvedOptions.detectionMode === 'multi' ? (chartWidth < 720 ? 80 : 92) : chartWidth < 720 ? 72 : 84,
   };
   const innerWidth = Math.max(chartWidth - chartPadding.left - chartPadding.right, 40);
   const innerHeight = Math.max(chartHeight - chartPadding.top - chartPadding.bottom, 40);
@@ -3781,18 +5260,107 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const focusBandHeight = focusBand ? Math.max(54, Math.min(76, innerHeight * 0.2)) : 0;
   const focusBandY = focusBand ? chartPadding.top + innerHeight - focusBandHeight - 10 : chartPadding.top + innerHeight;
   const plotContentBottom = focusBand ? focusBandY - 8 : chartPadding.top + innerHeight;
-  const inlineSeriesLabels = resolvedOptions.showInlineSeriesLabels
-    ? buildInlineSeriesLabels(analyses, getX, getY, chartPadding.top + 12, plotContentBottom - 10, chartWidth - chartPadding.right - 10)
+  const isDenseSeriesView = analyses.length > LEGEND_ROW_LIMIT;
+  const inlineLabelAnalyses =
+    isDenseSeriesView
+      ? []
+      : analyses.length > INLINE_SERIES_LABEL_LIMIT
+      ? [...analyses]
+          .sort((left, right) => right.maxSeverityScore - left.maxSeverityScore || right.anomalyCount - left.anomalyCount || left.label.localeCompare(right.label))
+          .slice(0, INLINE_SERIES_LABEL_LIMIT)
+      : analyses;
+  const inlineSeriesLabels = resolvedOptions.showInlineSeriesLabels && !isDenseSeriesView
+    ? buildInlineSeriesLabels(inlineLabelAnalyses, getX, getY, chartPadding.top + 12, plotContentBottom - 10, chartWidth - chartPadding.right - 10)
     : [];
 
   const bucketSpanLabel = formatEffectiveBucketSpanLabel(resolvedOptions.bucketSpan, effectiveBucketSpanMs);
   const howItWorks = buildHowItWorksText(resolvedOptions, effectiveBucketSpanMs);
   const inspectorStory = selectionDetail ? buildSignalStory(selectionDetail, resolvedOptions.algorithm) : '';
   const annotationExport = buildAnnotationExport(summaryItems, bucketSpanLabel);
-  const alertQuery = buildAlertPromQuery(scoreFeed.registered);
-  const alertExport = buildAlertExport(selectionDetail, resolvedOptions, bucketSpanLabel, scoreFeed.registered);
+  const alertQuery = buildAlertQuery(scoreFeed.registered);
+  const alertThreshold = getRecommendedAlertThreshold(resolvedOptions.severityPreset);
+  const currentFolderTitle = savedDashboardContext?.folderTitle || inferDashboardFolderTitle();
+  const currentPanelTitle = savedDashboardContext?.panelTitle || panelFallbackTitle;
+  const currentDashboardTitle = savedDashboardContext?.dashboardTitle || inferDashboardTitle() || 'Grafana dashboard';
+  const alertTarget = normalizeScoreFeedTarget(scoreFeed.registered[0]?.target ?? options.scoreFeedTarget);
+  const alertRuleName = buildAlertRuleDisplayName(currentFolderTitle, currentDashboardTitle, currentPanelTitle) || currentPanelTitle;
+  const alertLabels = buildAlertRuleLabels(dashboardUid, id ?? 0, alertTarget);
+  const alertAnnotations = buildAlertRuleAnnotations(selectionDetail, {
+    dashboardUid,
+    folderTitle: currentFolderTitle,
+    dashboardTitle: currentDashboardTitle,
+    panelId: id ?? 0,
+    panelTitle: currentPanelTitle,
+    ruleName: alertRuleName,
+  });
+  const alertDraftContext: AlertRuleDraftContext = {
+    dashboardUid,
+    folderTitle: currentFolderTitle,
+    dashboardTitle: currentDashboardTitle,
+    panelId: id ?? 0,
+    panelTitle: currentPanelTitle,
+    ruleName: alertRuleName,
+    queryLanguage: alertQueryLanguage,
+    alertQuery,
+    threshold: alertThreshold,
+    target: alertTarget,
+    labels: alertLabels,
+    annotations: alertAnnotations,
+  };
+  const alertLabelPairs = formatLabelPairs(alertLabels);
+  const alertExport = buildAlertExport(selectionDetail, resolvedOptions, bucketSpanLabel, scoreFeed.registered, alertDraftContext);
   const selectedAnnotationPayload = buildSelectedAnnotationPayload(selectionDetail, id ?? 0, dashboardUid, bucketSpanLabel);
   const selectedAnnotationExport = selectedAnnotationPayload ? JSON.stringify(selectedAnnotationPayload, null, 2) : '';
+  const selectedIncidentIndex = selectionDetail
+    ? Math.max(1, summaryItems.findIndex((item) => selectionKey(item.selection) === activeSelectionToken) + 1)
+    : 0;
+  const selectedSeriesLabel =
+    selectionDetail?.kind === 'point'
+      ? selectionDetail.seriesLabel
+      : selectionDetail?.kind === 'event'
+        ? selectionDetail.contributors.slice(0, 2).join(', ') || `${selectionDetail.activeSeries} active series`
+        : analyses[0]?.label ?? 'n/a';
+  const selectedValueLabel =
+    selectionDetail?.kind === 'point'
+      ? formatValue(selectionDetail.actual)
+      : selectionDetail?.kind === 'event'
+        ? `${selectionDetail.activeSeries} active`
+        : 'n/a';
+  const selectedExpectedLabel =
+    selectionDetail?.kind === 'point'
+      ? formatValue(selectionDetail.expected)
+      : selectionDetail?.kind === 'event'
+        ? `${selectionDetail.breakdown.length} contributors`
+        : 'n/a';
+  const selectedDeviationLabel =
+    selectionDetail?.kind === 'point'
+      ? selectionDetail.deviationPercent !== null
+        ? formatPercent(selectionDetail.deviationPercent)
+        : formatValue(selectionDetail.deviation)
+      : selectionDetail?.kind === 'event'
+        ? formatValue(selectionDetail.score)
+        : 'n/a';
+  const selectedRawScoreLabel = selectionDetail ? formatValue(selectionDetail.score) : 'n/a';
+  const selectedAlarmScoreLabel = selectionDetail ? `${SEVERITY_LABELS[selectionDetail.severityLabel]} ${selectionDetail.severityScore}` : 'n/a';
+  const selectedConfidenceLabel = selectionDetail ? CONFIDENCE_LABELS[selectionDetail.confidenceLabel] : 'n/a';
+  const selectedConfidenceScore = selectionDetail ? formatScoreValue(selectionDetail.confidenceScore) : 'n/a';
+  const selectedDataQualityLabel = selectionDetail
+    ? selectionDetail.dataQualityLabel === 'healthy'
+      ? 'Good'
+      : DATA_QUALITY_LABELS[selectionDetail.dataQualityLabel].replace(' data', '')
+    : 'n/a';
+  const selectedDataQualityScore = selectionDetail ? formatScoreValue(selectionDetail.confidenceScore) : 'n/a';
+  const headerDatasourceLabel = liveTargets[0]?.datasourceType
+    ? liveTargets[0].datasourceType.charAt(0).toUpperCase() + liveTargets[0].datasourceType.slice(1)
+    : SCORE_FEED_TARGET_LABELS[normalizeScoreFeedTarget(options.scoreFeedTarget)];
+  const severityLegendEntries: SeverityLabel[] = ['critical', 'high', 'medium', 'low'];
+  const legendAnalyses =
+    analyses.length > LEGEND_ROW_LIMIT
+      ? [...analyses]
+          .sort((left, right) => right.anomalyCount - left.anomalyCount || right.maxSeverityScore - left.maxSeverityScore || left.label.localeCompare(right.label))
+          .slice(0, LEGEND_ROW_LIMIT)
+      : analyses;
+  const hiddenLegendCount = Math.max(0, analyses.length - legendAnalyses.length);
   const selectedRect = selectionDetail
     ? {
         x: getX(selectionDetail.bucketStart),
@@ -3826,106 +5394,363 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const tooltipLeft = hoverX === null ? 0 : Math.max(16, Math.min(hoverX + 18, chartWidth - 290));
   const tooltipAlignRight = hoverX !== null && hoverX > chartWidth * 0.62;
   const tooltipStyle = hoverX === null ? undefined : { left: tooltipAlignRight ? undefined : tooltipLeft, right: tooltipAlignRight ? Math.max(14, chartWidth - hoverX + 14) : undefined };
-  const handleChartMouseMove = useCallback(
-    (event: React.MouseEvent<SVGSVGElement>) => {
-      const bounds = event.currentTarget.getBoundingClientRect();
-      const svgX = ((event.clientX - bounds.left) / bounds.width) * chartWidth;
-      if (svgX < chartPadding.left || svgX > chartWidth - chartPadding.right) {
-        if (pinnedTime === null) {
-          setHoveredTime(null);
-        }
-        return;
+  const handleChartMouseMove = (event: React.MouseEvent<SVGSVGElement>): void => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const svgX = ((event.clientX - bounds.left) / bounds.width) * chartWidth;
+    if (svgX < chartPadding.left || svgX > chartWidth - chartPadding.right) {
+      if (pinnedTime === null) {
+        setHoveredTime(null);
       }
+      return;
+    }
 
-      const targetTime = getTimeFromX(svgX);
-      const nearestIndex = findNearestTimeIndex(uniqueTimes, targetTime);
-      setHoveredTime(nearestIndex >= 0 ? uniqueTimes[nearestIndex] : null);
-    },
-    [chartPadding.left, chartPadding.right, chartWidth, getTimeFromX, pinnedTime, uniqueTimes]
-  );
-  const handleChartMouseLeave = useCallback(() => {
+    const targetTime = getTimeFromX(svgX);
+    const nearestIndex = findNearestTimeIndex(uniqueTimes, targetTime);
+    setHoveredTime(nearestIndex >= 0 ? uniqueTimes[nearestIndex] : null);
+  };
+  const handleChartMouseLeave = (): void => {
     if (pinnedTime === null) {
       setHoveredTime(null);
     }
-  }, [pinnedTime]);
-  const handleChartClick = useCallback(() => {
+  };
+  const handleChartClick = (): void => {
     if (hoverSnapshot) {
       setPinnedTime((current) => (current === hoverSnapshot.time ? null : hoverSnapshot.time));
     }
-  }, [hoverSnapshot]);
-  const handleChartKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (isKeyboardNavigationTarget(event.target) || orderedSummaryItems.length === 0) {
+  };
+  const handleChartKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (isKeyboardNavigationTarget(event.target) || orderedSummaryItems.length === 0) {
+      return;
+    }
+
+    const activeIndex = orderedSummaryItems.findIndex((item) => selectionKey(item.selection) === activeSelectionToken);
+    const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const next = orderedSummaryItems[(currentIndex + 1) % orderedSummaryItems.length];
+      selectSummaryItem(next);
+      return;
+    }
+
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const next = orderedSummaryItems[(currentIndex - 1 + orderedSummaryItems.length) % orderedSummaryItems.length];
+      selectSummaryItem(next);
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      const selected = orderedSummaryItems[currentIndex];
+      if (!selected) {
         return;
       }
 
-      const activeIndex = orderedSummaryItems.findIndex((item) => selectionKey(item.selection) === activeSelectionToken);
-      const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+      event.preventDefault();
+      setPinnedTime((current) => (current === selected.time ? null : selected.time));
+      setHoveredTime(selected.time);
+      return;
+    }
 
-      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-        event.preventDefault();
-        const next = orderedSummaryItems[(currentIndex + 1) % orderedSummaryItems.length];
-        selectSummaryItem(next);
-        return;
-      }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setPinnedTime(null);
+      setHoveredTime(null);
+    }
+  };
 
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const next = orderedSummaryItems[(currentIndex - 1 + orderedSummaryItems.length) % orderedSummaryItems.length];
-        selectSummaryItem(next);
-        return;
-      }
+  const inspectorPanel = (
+    <aside className={styles.inspectorCard} aria-label="Anomaly inspector">
+      <div className={styles.inspectorTop}>
+        <div className={styles.inspectorTitle}>Anomaly inspector</div>
+        <button type="button" className={styles.inspectorClose} aria-label="Inspector is pinned in this panel">
+          x
+        </button>
+      </div>
+      {selectionDetail ? (
+        <>
+          <div className={styles.inspectorTimestamp}>
+            <span>{formatTooltipTime(selectionDetail.time, timeRangeMs, timeZone)}</span>
+            <span aria-hidden="true">•</span>
+            <span style={{ color: SEVERITY_COLORS[selectionDetail.severityLabel] }}>
+              {SEVERITY_LABELS[selectionDetail.severityLabel]}
+            </span>
+          </div>
+          <div className={styles.inspectorRows}>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Series</span>
+              <span className={styles.inspectorRowValue}>{truncateLabel(selectedSeriesLabel, 34)}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Value</span>
+              <span className={styles.inspectorRowValue}>{selectedValueLabel}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Expected</span>
+              <span className={styles.inspectorRowValue}>{selectedExpectedLabel}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Deviation</span>
+              <span className={styles.inspectorRowValue}>{selectedDeviationLabel}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Raw detection score</span>
+              <span className={styles.inspectorRowValue}>{selectedRawScoreLabel}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Alert score (0-100)</span>
+              <span className={styles.inspectorRowValue} style={{ color: SEVERITY_COLORS[selectionDetail.severityLabel] }}>{selectedAlarmScoreLabel}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Bucket</span>
+              <span className={styles.inspectorRowValue}>{bucketSpanLabel}</span>
+            </div>
+            <div className={styles.inspectorRow}>
+              <span className={styles.inspectorRowLabel}>Incident</span>
+              <span className={styles.inspectorRowValue}>
+                {selectedIncidentIndex} of {Math.max(summaryItems.length, selectedIncidentIndex)}
+              </span>
+            </div>
+          </div>
+          <div>
+            <div className={styles.inspectorSectionTitle}>Why is this anomalous?</div>
+            <div className={styles.recommendationText} style={{ marginTop: 10 }}>
+              {inspectorStory}
+            </div>
+          </div>
+          <div className={styles.inspectorRows}>
+            <div className={styles.inspectorHealthRow}>
+              <span className={styles.inspectorRowLabel}>Confidence</span>
+              <span>
+                <span
+                  className={styles.inspectorPill}
+                  style={{ background: `${CONFIDENCE_COLORS[selectionDetail.confidenceLabel]}33`, color: CONFIDENCE_COLORS[selectionDetail.confidenceLabel] }}
+                >
+                  {selectedConfidenceLabel}
+                </span>
+                <span className={styles.inspectorRowValue} style={{ marginLeft: 10 }}>
+                  {selectedConfidenceScore}%
+                </span>
+              </span>
+            </div>
+            <div className={styles.inspectorHealthRow}>
+              <span className={styles.inspectorRowLabel}>Data quality</span>
+              <span>
+                <span className={styles.inspectorPill} style={{ background: 'rgba(34,197,94,0.24)', color: '#86EFAC' }}>
+                  {selectedDataQualityLabel}
+                </span>
+                <span className={styles.inspectorRowValue} style={{ marginLeft: 10 }}>
+                  {selectedDataQualityScore}%
+                </span>
+              </span>
+            </div>
+          </div>
+          <div>
+            <div className={styles.inspectorSectionTitle}>Rule labels</div>
+            <div className={styles.labelChipGrid} style={{ marginTop: 10 }}>
+              {Object.entries(alertLabels).map(([key, value]) => (
+                <span key={key} className={styles.labelChip} title={`${key}=${value}`}>
+                  <span className={styles.labelChipKey}>{key}</span>
+                  <span>=</span>
+                  <span className={styles.labelChipValue}>{value}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className={styles.inspectorActionStack}>
+            <button
+              type="button"
+              className={`${styles.actionButton} ${styles.inspectorActionButton} ${styles.inspectorActionButtonPrimary}`}
+              disabled={!alertQuery}
+              onClick={() => {
+                if (!alertQuery) {
+                  setActionToast({ tone: 'error', message: 'Sync anomaly score feed first to generate the alert query.' });
+                  return;
+                }
 
-      if (event.key === 'Enter' || event.key === ' ') {
-        const selected = orderedSummaryItems[currentIndex];
-        if (!selected) {
-          return;
-        }
+                const openedBuilder = openGrafanaAlertRuleBuilder(alertDraftContext);
+                setActionToast({
+                  tone: 'success',
+                  message: openedBuilder
+                    ? 'Opened Grafana alert rule builder. Copying the alert query to your clipboard.'
+                    : 'Copying the alert query. If the builder did not open, use Alerting > Alert rules > New alert rule.',
+                });
 
-        event.preventDefault();
-        setPinnedTime((current) => (current === selected.time ? null : selected.time));
-        setHoveredTime(selected.time);
-        return;
-      }
+                void copyTextToClipboard(alertQuery)
+                  .then(() =>
+                    setActionToast({
+                      tone: 'success',
+                      message: openedBuilder
+                        ? 'Opened Grafana alert rule builder and copied the alert query.'
+                        : 'Copied the alert query. If the builder did not open, use Alerting > Alert rules > New alert rule.',
+                    })
+                  )
+                  .catch((error: unknown) =>
+                    setActionToast({
+                      tone: 'error',
+                      message: error instanceof Error ? error.message : 'Failed to copy the alert query.',
+                    })
+                  );
+              }}
+            >
+              Open alert rule builder
+            </button>
+            <button
+              type="button"
+              className={`${styles.actionButtonSecondary} ${styles.inspectorActionButton} ${styles.inspectorActionButtonSecondary}`}
+              disabled={!alertLabelPairs}
+              onClick={() => {
+                void copyTextToClipboard(alertLabelPairs)
+                  .then(() => setActionToast({ tone: 'success', message: 'Copied suggested alert labels.' }))
+                  .catch((error: unknown) =>
+                    setActionToast({
+                      tone: 'error',
+                      message: error instanceof Error ? error.message : 'Failed to copy alert labels.',
+                    })
+                  );
+              }}
+            >
+              Copy rule labels
+            </button>
+            <button
+              type="button"
+              className={`${styles.actionButtonSecondary} ${styles.inspectorActionButton} ${styles.inspectorActionButtonSecondary}`}
+              disabled={!selectedAnnotationPayload || !dashboardUid}
+              onClick={() => {
+                if (!selectedAnnotationPayload) {
+                  setActionToast({ tone: 'error', message: 'Select an anomaly first to create an annotation.' });
+                  return;
+                }
 
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setPinnedTime(null);
-        setHoveredTime(null);
-      }
-    },
-    [activeSelectionToken, orderedSummaryItems, selectSummaryItem]
+                if (!dashboardUid) {
+                  setActionToast({ tone: 'error', message: 'Save the dashboard once before creating Grafana annotations from the panel.' });
+                  return;
+                }
+
+                void createGrafanaAnnotation(selectedAnnotationPayload)
+                  .then(() => setActionToast({ tone: 'success', message: 'Created a Grafana annotation for the selected anomaly.' }))
+                  .catch((error: unknown) =>
+                    setActionToast({
+                      tone: 'error',
+                      message: error instanceof Error ? error.message : 'Failed to create the Grafana annotation.',
+                    })
+                  );
+              }}
+            >
+              Create annotation
+            </button>
+            <button
+              type="button"
+              className={`${styles.actionButtonSecondary} ${styles.inspectorActionButton} ${styles.inspectorActionButtonSecondary}`}
+              disabled={!alertQuery}
+              onClick={() => {
+                if (!alertQuery) {
+                  setActionToast({ tone: 'error', message: 'Sync anomaly score feed first to generate the alert query.' });
+                  return;
+                }
+
+                void copyTextToClipboard(alertQuery)
+                  .then(() => setActionToast({ tone: 'success', message: 'Copied the alert query for Grafana Alerting.' }))
+                  .catch((error: unknown) =>
+                    setActionToast({
+                      tone: 'error',
+                      message: error instanceof Error ? error.message : 'Failed to copy the alert query.',
+                    })
+                  );
+              }}
+            >
+              Copy alert query
+            </button>
+          </div>
+          <div>
+            <div className={styles.inspectorSectionTitle}>Query preview</div>
+            <pre className={styles.queryPreview}>{alertQuery || `Sync the score feed to generate ${alertQueryLanguage}.`}</pre>
+          </div>
+        </>
+      ) : (
+        <div className={styles.subtitle}>Select a detected incident to see why it was flagged, how strong the signal is, and whether it is ready for alerting.</div>
+      )}
+    </aside>
   );
+
   return (
     <div className={styles.wrapper}>
-      <div className={styles.header}>
-        <div className={styles.titleBlock}>
-          <div className={styles.title}>{options.title || 'Anomaly detector'}</div>
-          <div className={styles.subtitle}>
-            {ALGORITHM_LABELS[resolvedOptions.algorithm]} across {seriesCount} numeric series | {MODE_LABELS[resolvedOptions.detectionMode]} | {bucketSpanLabel}
-          </div>
-        </div>
-        <div className={styles.stats}>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>Series</div>
-            <div className={styles.statValue}>{seriesCount}</div>
-          </div>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>Anomalies</div>
-            <div className={styles.statValue}>{anomalyCount}</div>
-          </div>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>Peak score</div>
-            <div className={styles.statValue}>{formatValue(peakScore)}</div>
-          </div>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>Alert severity</div>
-            <div className={styles.statValue} style={{ color: SEVERITY_COLORS[peakSeverity.severityLabel] }}>{SEVERITY_LABELS[peakSeverity.severityLabel]}</div>
-          </div>
-        </div>
-      </div>
+      <div
+        className={styles.operationalCanvas}
+        style={{ gridTemplateColumns: sectionVisibility.inspector ? undefined : 'minmax(0, 1fr)' }}
+      >
+        <main className={styles.workspacePane}>
+          {showStatusHeader ? (
+            <div
+              className={styles.statusHeader}
+              style={{ gridTemplateColumns: sectionVisibility.initialLabels && sectionVisibility.statistics ? undefined : 'minmax(0, 1fr)' }}
+            >
+              {sectionVisibility.initialLabels ? (
+                <>
+                  <div className={styles.statusRail} style={{ background: peakSeverityColor }} />
+                  <div className={styles.statusIcon} aria-hidden="true">
+                    <svg className={styles.statusIconSvg} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M2.5 12h4.1l2.1-5.7 3.9 11.4 2.1-5.7h6.8"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                      />
+                      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeOpacity="0.28" strokeWidth="1.4" />
+                    </svg>
+                  </div>
+                  <div className={styles.statusMain}>
+                    <div className={styles.title} role="heading" aria-level={2}>
+                      Anomaly Detector
+                    </div>
+                    <div className={styles.headerMetaGrid}>
+                      <span>
+                        Algorithm: <span className={styles.metaAccent}>{resolvedOptions.algorithm}</span>
+                      </span>
+                      <span>Bucket: {bucketSpanLabel}</span>
+                      <span>Series: {truncateLabel(selectedSeriesLabel, 34)}</span>
+                      <span>Datasource: {headerDatasourceLabel}</span>
+                    </div>
+                    {isUsingStaleData ? (
+                      <div className={styles.staleBanner}>
+                        Showing the last good snapshot while Grafana refreshes the query result.
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+              {sectionVisibility.statistics ? <div className={styles.statusStats}>
+              <div className={`${styles.statCard} ${styles.statCardPrimary}`}>
+                <div className={styles.statLabel}>Severity</div>
+                <div className={styles.statValue}>{SEVERITY_LABELS[peakSeverity.severityLabel]}</div>
+                <div className={styles.statCaption}>
+                  {selectionDetail ? `Since ${formatTooltipTime(selectionDetail.time, timeRangeMs, timeZone)}` : `Peak ${formatScoreValue(peakScore)}`}
+                </div>
+              </div>
+              <div className={styles.statCard}>
+                <div className={styles.statLabel}>Confidence</div>
+                <div className={styles.statValue}>{selectedConfidenceScore}%</div>
+                <div className={styles.statCaption}>{selectedConfidenceLabel}</div>
+              </div>
+              <div className={styles.statCard} role="status" aria-live="polite" aria-atomic="true">
+                <div className={styles.statLabel}>Anomalies</div>
+                <div className={styles.statValue}>{anomalyCount}</div>
+                <div className={styles.statCaption}>clustered</div>
+              </div>
+              <div className={styles.statCard}>
+                <div className={styles.statLabel}>Data quality</div>
+                <div className={styles.statValue} style={{ color: '#4ADE80' }}>
+                  {selectedDataQualityLabel}
+                </div>
+                <div className={styles.statCaption}>{selectedDataQualityScore}%</div>
+              </div>
+              </div> : null}
+            </div>
+          ) : null}
 
-      <div className={styles.recommendationBanner}>
+      {sectionVisibility.initialLabels ? <div className={styles.recommendationBanner}>
         <div className={styles.recommendationBadge}>{resolvedOptions.recommendation.badge}</div>
         <div className={styles.recommendationCopy}>
           <div className={styles.recommendationTitle}>{resolvedOptions.recommendation.title}</div>
@@ -3934,7 +5759,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
             {resolvedOptions.recommendation.matchedNames.length > 0 ? ` Matched metrics: ${resolvedOptions.recommendation.matchedNames.slice(0, 3).join(', ')}.` : ''}
           </div>
         </div>
-      </div>
+      </div> : null}
 
       {actionToast ? (
         <div className={styles.actionNotice}>
@@ -3954,22 +5779,91 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
         </div>
       ) : null}
 
-      <div
+      {sectionVisibility.anomalyFeed ? <>
+      <div className={styles.incidentHeader}>
+        <div className={styles.cardTitle} role="heading" aria-level={3}>
+          Detected incidents
+        </div>
+        <div className={styles.severityLegend} aria-label="Incident severity legend">
+          {severityLegendEntries.map((severity) => (
+            <span key={severity} className={styles.severityLegendItem}>
+              <span className={styles.severityLegendSwatch} style={{ background: SEVERITY_COLORS[severity] }} />
+              {SEVERITY_LABELS[severity]}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {incidentRibbonSegments.length > 0 ? (
+        <div className={styles.incidentRibbonPanel} aria-label="Detected incident overview">
+          <svg width="100%" height="34" viewBox={`0 0 ${chartWidth} 34`} preserveAspectRatio="none" role="img" aria-label="Detected incident overview">
+            <rect x={chartPadding.left} y={11} width={innerWidth} height={12} rx={6} fill={theme.isDark ? '#252C38' : '#E2E8F0'} opacity={0.88} />
+            {incidentRibbonSegments.map((segment) => {
+              const start = Math.max(chartPadding.left, getX(segment.start));
+              const end = Math.min(chartWidth - chartPadding.right, getX(segment.end));
+              const segmentWidth = Math.max(8, end - start);
+              const selected = selectionKey(activeSelection) === selectionKey(segment.selection);
+              const color = SEVERITY_COLORS[segment.severityLabel];
+              return (
+                <g
+                  key={`overview-${segment.key}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setSelection(segment.selection);
+                    setPinnedTime(segment.center);
+                    setHoveredTime(segment.center);
+                  }}
+                >
+                  <title>{`${segment.label} | ${SEVERITY_LABELS[segment.severityLabel]} ${segment.severityScore} | ${formatTooltipTime(segment.center, timeRangeMs, timeZone)}`}</title>
+                  <rect
+                    x={start}
+                    y={11}
+                    width={segmentWidth}
+                    height={12}
+                    rx={6}
+                    fill={color}
+                    fillOpacity={selected ? 1 : 0.82}
+                    stroke={selected ? (theme.isDark ? '#F8FAFC' : '#0F172A') : 'none'}
+                    strokeWidth={selected ? 1.2 : 0}
+                  />
+                  {segment.count > 1 && segmentWidth >= 28 ? (
+                    <g>
+                      <rect x={start + segmentWidth / 2 - 13} y={2} width={26} height={18} rx={8} fill={color} stroke={theme.isDark ? '#7F1D1D' : '#FFFFFF'} strokeWidth={1} />
+                      <text x={start + segmentWidth / 2} y={15} textAnchor="middle" fill="#FFFFFF" fontSize="10" fontWeight="900" pointerEvents="none">
+                        x{segment.count}
+                      </text>
+                    </g>
+                  ) : null}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      ) : (
+        <div className={styles.incidentRibbonPanel} aria-label="Detected incident overview">
+          <div className={styles.incidentRibbonEmpty}>No clustered incidents in this time range.</div>
+        </div>
+      )}
+      </> : null}
+
+      {sectionVisibility.mainChart ? <div
         className={styles.chartCard}
+        ref={chartCardRef}
         tabIndex={0}
         onKeyDown={handleChartKeyDown}
         aria-label="Anomaly chart. Use left and right arrows to move between incidents, Enter to pin, and Escape to clear."
       >
         <svg
           width="100%"
-          height={chartHeight}
+          height="100%"
           viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+          preserveAspectRatio="none"
           role="img"
           aria-label="Anomaly chart"
           onMouseMove={handleChartMouseMove}
           onMouseLeave={handleChartMouseLeave}
           onClick={handleChartClick}
-          style={{ cursor: 'crosshair' }}
+          style={{ width: '100%', height: '100%', display: 'block', cursor: 'crosshair' }}
         >
           <defs>
             <clipPath id={plotClipId}>
@@ -3995,24 +5889,6 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
               </g>
             );
           })}
-          {incidentRibbonSegments.length > 0 ? (
-            <g>
-              <rect x={chartPadding.left + 4} y={chartPadding.top + 8} width={innerWidth - 8} height={10} rx={5} fill={theme.isDark ? '#102033' : '#EEF4FF'} opacity={0.9} />
-              {incidentRibbonSegments.map((segment) => {
-                const start = Math.max(chartPadding.left + 4, getX(segment.start));
-                const end = Math.min(chartWidth - chartPadding.right - 4, getX(segment.end));
-                const width = Math.max(8, end - start);
-                const selected = selectionKey(activeSelection) === selectionKey(segment.selection);
-                const color = SEVERITY_COLORS[segment.severityLabel];
-                return (
-                  <g key={segment.key} style={{ cursor: 'pointer' }} onClick={(event) => { event.stopPropagation(); setSelection(segment.selection); setPinnedTime(segment.center); }}>
-                    <title>{`${segment.label} | ${SEVERITY_LABELS[segment.severityLabel]} ${segment.severityScore} | ${formatTooltipTime(segment.center, timeRangeMs, timeZone)}`}</title>
-                    <rect x={start} y={chartPadding.top + 8} width={width} height={10} rx={5} fill={color} fillOpacity={selected ? 0.98 : 0.78} stroke={selected ? (theme.isDark ? '#FFFFFF' : '#0F172A') : 'none'} strokeWidth={selected ? 1.2 : 0} />
-                  </g>
-                );
-              })}
-            </g>
-          ) : null}
           {selectedRect ? (
             <rect
               x={Math.max(chartPadding.left, selectedRect.x)}
@@ -4137,10 +6013,16 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
             const expectedPath = resolvedOptions.showExpectedLine ? buildLinePath(analysis.points, getX, getY, (point) => point.expected) : '';
             const selectedPointTime = activeSelection?.kind === 'point' && activeSelection.seriesKey === analysis.key ? activeSelection.time : null;
             const markerShapeMode = resolvedOptions.markerShapeMode;
+            const denseMarkerGap = Math.max(54, innerWidth / 12);
+            const standardMarkerGap = Math.max(12, innerWidth / 44);
             const visiblePoints =
               resolvedOptions.detectionMode === 'multi'
                 ? []
-                : selectVisibleMarkers(analysis.points.filter((point) => point.isAnomaly), getX, Math.max(12, innerWidth / 44), selectedPointTime);
+                : limitMarkerCount(
+                    selectVisibleMarkers(analysis.points.filter((point) => point.isAnomaly), getX, isDenseSeriesView ? denseMarkerGap : standardMarkerGap, selectedPointTime),
+                    isDenseSeriesView ? 2 : 8,
+                    selectedPointTime
+                  );
             return (
               <g key={analysis.key}>
                 {areaPath ? <path d={areaPath} fill={analysis.color} opacity={selectionDetail && selectionDetail.kind === 'point' && selectionDetail.seriesKey === analysis.key ? 0.14 : 0.07} /> : null}
@@ -4380,23 +6262,51 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
             </div>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
-      <div className={styles.legend}>
-        {analyses.map((analysis) => (
-          <div key={analysis.key} className={styles.legendItem} title={`${analysis.label} | ${analysis.anomalyCount} flagged buckets | max ${formatValue(analysis.maxScore)}`}>
-            <span className={styles.legendSwatch} style={{ background: analysis.color }} />
-            <span>
-              {analysis.label} | {analysis.anomalyCount} flagged buckets | max {formatValue(analysis.maxScore)}
-            </span>
+      {showBottomDock ? <div
+        className={styles.bottomDock}
+        style={{ gridTemplateColumns: sectionVisibility.seriesSummary && sectionVisibility.scoreFeed && scoreFeedCard ? undefined : 'minmax(0, 1fr)' }}
+      >
+        {sectionVisibility.seriesSummary ? <div className={styles.legendTable} aria-label="Series anomaly summary">
+          <div className={styles.legendTableHeader}>
+            <span>Series ({seriesCount})</span>
+            <span>Flagged</span>
+            <span>Max</span>
+            <span>Last</span>
           </div>
-        ))}
-      </div>
+          {legendAnalyses.map((analysis) => {
+            const lastPoint = analysis.allPoints[analysis.allPoints.length - 1] ?? null;
+            return (
+              <div key={analysis.key} className={styles.legendTableRow} title={`${analysis.label} | ${analysis.anomalyCount} flagged buckets | max ${formatScoreValue(analysis.maxSeverityScore)}`}>
+                <span className={styles.legendSeriesName}>
+                  <span className={styles.legendSwatch} style={{ background: analysis.color }} />
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{analysis.label}</span>
+                </span>
+                <span className={styles.legendValue} style={{ color: analysis.anomalyCount > 0 ? SEVERITY_COLORS[analysis.maxSeverityLabel] : undefined }}>
+                  {analysis.anomalyCount}
+                </span>
+                <span className={styles.legendValue}>{formatScoreValue(analysis.maxSeverityScore)}</span>
+                <span className={styles.legendValue}>{lastPoint ? formatValue(lastPoint.value) : 'n/a'}</span>
+              </div>
+            );
+          })}
+          {hiddenLegendCount > 0 ? (
+            <div className={styles.legendTableFooter}>
+              <span>Showing top {legendAnalyses.length} active series</span>
+              <span>+{hiddenLegendCount} more hidden to keep the panel readable</span>
+            </div>
+          ) : null}
+        </div> : null}
+        {sectionVisibility.scoreFeed ? scoreFeedCard : null}
+      </div> : null}
 
-      {options.showSummary === false ? scoreFeedCard : null}
-
-      {options.showSummary !== false ? (
-        <div className={styles.grid}>
+      {showSecondaryDock ? (
+        <div
+          className={styles.secondaryDock}
+          style={{ gridTemplateColumns: sectionVisibility.anomalyFeed && showSideUtilities ? undefined : 'minmax(0, 1fr)' }}
+        >
+          {sectionVisibility.anomalyFeed ? <>
           <div className={styles.card}>
             <div className={styles.cardTitle}>Detected incidents</div>
             {orderedSummaryItems.length > 0 ? (
@@ -4450,7 +6360,6 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                     );
                   })}
                 </svg>
-                <div className={styles.summaryTimelineHint}>Keyboard: Left/right arrows move between incidents, Enter pins the current view, Esc clears the pin.</div>
               </div>
             ) : null}
             <div className={styles.summaryList}>
@@ -4479,9 +6388,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
               )}
             </div>
           </div>
-
-          <div className={styles.card}>
-            <div className={styles.cardTitle}>Anomaly inspector</div>
+          <div className={`${styles.card} ${styles.inlineInspectorLegacy}`}>
+            <div className={styles.cardTitle}>Legacy inspector details</div>
             {selectionDetail ? (
               <>
                 <div className={styles.recommendationText}>{selectionDetail.title}</div>
@@ -4491,27 +6399,6 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                   <button
                     type="button"
                     className={styles.actionButton}
-                    onClick={() => {
-                      if (!selectedAnnotationExport) {
-                        setActionToast({ tone: 'error', message: 'Select an anomaly first to copy its annotation JSON.' });
-                        return;
-                      }
-
-                      void copyTextToClipboard(selectedAnnotationExport)
-                        .then(() => setActionToast({ tone: 'success', message: 'Copied the selected anomaly annotation JSON.' }))
-                        .catch((error: unknown) =>
-                          setActionToast({
-                            tone: 'error',
-                            message: error instanceof Error ? error.message : 'Failed to copy the annotation JSON.',
-                          })
-                        );
-                    }}
-                  >
-                    Copy annotation JSON
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.actionButtonSecondary}
                     disabled={!selectedAnnotationPayload || !dashboardUid}
                     onClick={() => {
                       if (!selectedAnnotationPayload) {
@@ -4536,15 +6423,58 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                   >
                     Create annotation
                   </button>
+                  <button
+                    type="button"
+                    className={styles.actionButtonSecondary}
+                    disabled={!alertQuery}
+                    onClick={() => {
+                      if (!alertQuery) {
+                        setActionToast({ tone: 'error', message: 'Sync anomaly score feed first to generate the alert query.' });
+                        return;
+                      }
+
+                      void copyTextToClipboard(alertQuery)
+                        .then(() => setActionToast({ tone: 'success', message: 'Copied the alert query for Grafana Alerting.' }))
+                        .catch((error: unknown) =>
+                          setActionToast({
+                            tone: 'error',
+                            message: error instanceof Error ? error.message : 'Failed to copy the alert query.',
+                          })
+                        );
+                    }}
+                  >
+                    Copy alert query
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.actionButtonSecondary}
+                    onClick={() => {
+                      if (!selectedAnnotationExport) {
+                        setActionToast({ tone: 'error', message: 'Select an anomaly first to copy its annotation JSON.' });
+                        return;
+                      }
+
+                      void copyTextToClipboard(selectedAnnotationExport)
+                        .then(() => setActionToast({ tone: 'success', message: 'Copied the selected anomaly annotation JSON.' }))
+                        .catch((error: unknown) =>
+                          setActionToast({
+                            tone: 'error',
+                            message: error instanceof Error ? error.message : 'Failed to copy the annotation JSON.',
+                          })
+                        );
+                    }}
+                  >
+                    Copy annotation JSON
+                  </button>
                 </div>
                 {!dashboardUid ? <div className={styles.subtitle}>Save the dashboard once so Grafana knows which dashboard the new annotation belongs to.</div> : null}
                 <div className={styles.detailGrid}>
                   <div className={styles.detailStat}>
-                    <div className={styles.detailLabel}>Detection strength</div>
+                    <div className={styles.detailLabel}>Raw detection score</div>
                     <div className={styles.detailValue}>{formatValue(selectionDetail.score)}</div>
                   </div>
                   <div className={styles.detailStat}>
-                    <div className={styles.detailLabel}>Severity</div>
+                    <div className={styles.detailLabel}>Alert score (0-100)</div>
                     <div className={styles.detailValue} style={{ color: SEVERITY_COLORS[selectionDetail.severityLabel] }}>{SEVERITY_LABELS[selectionDetail.severityLabel]} {selectionDetail.severityScore}</div>
                   </div>
                   <div className={styles.detailStat}>
@@ -4645,27 +6575,26 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
               <div className={styles.subtitle}>Select a detected incident to see why it was flagged, how strong the signal is, and whether it is ready for alerting.</div>
             )}
           </div>
+          </> : null}
 
-          <div className={styles.card}>
-            <div className={styles.cardTitle}>Active detection profile</div>
-            <div className={styles.recommendationText}>{howItWorks}</div>
-            <div className={styles.detailGrid}>
-              <div className={styles.detailStat}><div className={styles.detailLabel}>Setup mode</div><div className={styles.detailValue}>{SETUP_MODE_LABELS[resolvedOptions.setupMode]}</div></div>
-              <div className={styles.detailStat}><div className={styles.detailLabel}>Metric preset</div><div className={styles.detailValue}>{METRIC_PRESET_LABELS[resolvedOptions.metricPreset]}</div></div>
-              <div className={styles.detailStat}><div className={styles.detailLabel}>Effective preset</div><div className={styles.detailValue}>{resolvedOptions.effectiveMetricPreset === 'custom' ? 'Custom' : METRIC_PRESET_LABELS[resolvedOptions.effectiveMetricPreset]}</div></div>
-              <div className={styles.detailStat}><div className={styles.detailLabel}>Severity preset</div><div className={styles.detailValue}>{SEVERITY_PRESET_LABELS[resolvedOptions.severityPreset]}</div></div>
-            </div>
-          </div>
+          {showSideUtilities ? <div className={styles.sideUtilityStack}>
+            {sectionVisibility.detectionProfile ? <div className={`${styles.card} ${styles.profileCard}`}>
+              <div className={styles.cardTitle}>Active detection profile</div>
+              <div className={`${styles.recommendationText} ${styles.profileSummary}`}>{howItWorks}</div>
+              <div className={styles.profileDetailGrid}>
+                <div className={styles.detailStat}><div className={styles.detailLabel}>Setup mode</div><div className={styles.detailValue}>{SETUP_MODE_LABELS[resolvedOptions.setupMode]}</div></div>
+                <div className={styles.detailStat}><div className={styles.detailLabel}>Metric preset</div><div className={styles.detailValue}>{METRIC_PRESET_LABELS[resolvedOptions.metricPreset]}</div></div>
+                <div className={styles.detailStat}><div className={styles.detailLabel}>Effective preset</div><div className={styles.detailValue}>{resolvedOptions.effectiveMetricPreset === 'custom' ? 'Custom' : METRIC_PRESET_LABELS[resolvedOptions.effectiveMetricPreset]}</div></div>
+                <div className={styles.detailStat}><div className={styles.detailLabel}>Severity preset</div><div className={styles.detailValue}>{SEVERITY_PRESET_LABELS[resolvedOptions.severityPreset]}</div></div>
+              </div>
+            </div> : null}
 
-          {scoreFeedCard}
-
-          {options.showExports !== false ? (
-            <>
-              <div className={`${styles.card} ${styles.wideCard}`}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+            {sectionVisibility.exports ? (
+              <div className={`${styles.card} ${styles.handoffCard}`}>
+                <div className={styles.handoffHeader}>
+                  <div style={{ minWidth: 0, flex: '1 1 220px' }}>
                     <div className={styles.cardTitle}>Alerting & automation</div>
-                    <div className={styles.subtitle}>Hidden by default to keep the dashboard clean. Expand only when you need annotation payloads, alert queries, or operational handoff JSON.</div>
+                    <div className={styles.subtitle}>Optional handoff only. Daily alert setup should use the inspector buttons; expand this when you need raw JSON.</div>
                   </div>
                   <button
                     type="button"
@@ -4675,83 +6604,105 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                     {exportsExpanded ? 'Hide exports' : 'Show exports'}
                   </button>
                 </div>
-              </div>
-              {exportsExpanded ? (
-                <>
-                  <div className={`${styles.card} ${styles.wideCard}`}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                      <div className={styles.cardTitle}>Annotation export</div>
-                      <button
-                        type="button"
-                        className={styles.actionButtonSecondary}
-                        onClick={() => {
-                          void copyTextToClipboard(annotationExport)
-                            .then(() => setActionToast({ tone: 'success', message: 'Copied the annotation export JSON.' }))
-                            .catch((error: unknown) =>
-                              setActionToast({
-                                tone: 'error',
-                                message: error instanceof Error ? error.message : 'Failed to copy the annotation export JSON.',
-                              })
-                            );
-                        }}
-                      >
-                        Copy JSON
-                      </button>
+                {exportsExpanded ? (
+                  <>
+                    <div className={styles.feedRuleCard}>
+                      <div className={styles.handoffHeader}>
+                        <div className={styles.cardTitle}>Annotation export</div>
+                        <button
+                          type="button"
+                          className={styles.actionButtonSecondary}
+                          onClick={() => {
+                            void copyTextToClipboard(annotationExport)
+                              .then(() => setActionToast({ tone: 'success', message: 'Copied the annotation export JSON.' }))
+                              .catch((error: unknown) =>
+                                setActionToast({
+                                  tone: 'error',
+                                  message: error instanceof Error ? error.message : 'Failed to copy the annotation export JSON.',
+                                })
+                              );
+                          }}
+                        >
+                          Copy JSON
+                        </button>
+                      </div>
+                      <div className={styles.subtitle}>Use this JSON as a ready annotation or incident handoff payload.</div>
+                      <pre className={styles.monoBlock}>{annotationExport}</pre>
                     </div>
-                    <div className={styles.subtitle}>Use this JSON as a ready annotation or incident handoff payload.</div>
-                    <pre className={styles.monoBlock}>{annotationExport}</pre>
-                  </div>
-                  <div className={`${styles.card} ${styles.wideCard}`}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                      <div style={{ minWidth: 0, flex: '1 1 320px' }}>
-                        <div className={styles.cardTitle}>Alert rule export</div>
-                        <div className={styles.subtitle}>
-                          {alertQuery
-                            ? `Paste this PromQL into Grafana Alerting, then set WHEN QUERY IS ABOVE ${getRecommendedAlertThreshold(resolvedOptions.severityPreset)} FOR 2m.`
-                            : 'Sync Prometheus score feed first to generate an alert-ready anomaly score query.'}
+                    <div className={styles.feedRuleCard}>
+                      <div className={styles.handoffHeader}>
+                        <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+                          <div className={styles.cardTitle}>Alert rule export</div>
+                          <div className={styles.subtitle}>
+                            {alertQuery
+                              ? `Paste this ${alertQueryLanguage} into Grafana Alerting, then set WHEN QUERY IS ABOVE ${alertThreshold} FOR 10m and evaluate every 3m.`
+                              : 'Sync anomaly score feed first to generate an alert-ready anomaly score query.'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.actionButtonSecondary}
+                          disabled={!alertQuery}
+                          onClick={() => {
+                            if (!alertQuery) {
+                              setActionToast({ tone: 'error', message: 'Sync anomaly score feed first to generate the alert query.' });
+                              return;
+                            }
+
+                            void copyTextToClipboard(alertQuery)
+                              .then(() => setActionToast({ tone: 'success', message: 'Copied the alert query for Grafana Alerting.' }))
+                              .catch((error: unknown) =>
+                                setActionToast({
+                                  tone: 'error',
+                                  message: error instanceof Error ? error.message : 'Failed to copy the alert query.',
+                                })
+                              );
+                          }}
+                        >
+                          Copy query
+                        </button>
+                      </div>
+                      <div>
+                        <div className={styles.subtitle}>Suggested labels</div>
+                        <div className={styles.labelChipGrid} style={{ marginTop: 8 }}>
+                          {Object.entries(alertLabels).map(([key, value]) => (
+                            <span key={key} className={styles.labelChip} title={`${key}=${value}`}>
+                              <span className={styles.labelChipKey}>{key}</span>
+                              <span>=</span>
+                              <span className={styles.labelChipValue}>{value}</span>
+                            </span>
+                          ))}
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        className={styles.actionButtonSecondary}
-                        disabled={!alertQuery}
-                        onClick={() => {
-                          if (!alertQuery) {
-                            setActionToast({ tone: 'error', message: 'Sync Prometheus score feed first to generate the alert query.' });
-                            return;
-                          }
-
-                          void copyTextToClipboard(alertQuery)
-                            .then(() => setActionToast({ tone: 'success', message: 'Copied the alert query for Grafana Alerting.' }))
-                            .catch((error: unknown) =>
-                              setActionToast({
-                                tone: 'error',
-                                message: error instanceof Error ? error.message : 'Failed to copy the alert query.',
-                              })
-                            );
-                        }}
-                      >
-                        Copy query
-                      </button>
+                      <div className={styles.codeLine}>{alertQuery || 'Sync anomaly score feed first to generate an alert-ready query.'}</div>
+                      <pre className={styles.monoBlock}>{alertExport}</pre>
                     </div>
-                    <div className={styles.codeLine}>{alertQuery || 'Sync Prometheus score feed first to generate an alert-ready PromQL query.'}</div>
-                    <pre className={styles.monoBlock}>{alertExport}</pre>
-                  </div>
-                </>
-              ) : null}
-            </>
-          ) : null}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div> : null}
         </div>
       ) : null}
+        </main>
+        {sectionVisibility.inspector ? <aside className={styles.inspectorRail}>{inspectorPanel}</aside> : null}
+      </div>
     </div>
   );
 };
 
 export const __testables = {
+  resolveSeriesDisplayName,
+  collectPreparedSeries,
+  resolveSectionVisibility,
   normalizeScoreFeedEndpoint,
   extractPrometheusTargets,
   buildMetricHintNames,
   buildScoreFeedSyncHash,
+  buildPanelScoreFeedRegistrationPayload,
+  bucketSpanToSeconds,
+  buildAlertQuery,
+  getAlertQueryLanguage,
   buildSelectedAnnotationPayload,
   buildGrafanaErrorMessage,
 };

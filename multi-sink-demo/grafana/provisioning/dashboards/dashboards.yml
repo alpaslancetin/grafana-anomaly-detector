@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Multi Sink Demo
+    orgId: 1
+    folder: Multi Sink Demo
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

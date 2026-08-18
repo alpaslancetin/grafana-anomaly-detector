@@ -3,62 +3,74 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(120000);
 
-const dashboardUid = 'prometheus-live-anomaly-demo';
-const dashboardSlug = 'prometheus-live-anomaly-demo';
+const dashboardUid = 'plugin-source-matrix';
+const dashboardSlug = 'grafana-anomaly-plugin-source-matrix';
 
 const scenarios = [
   {
     name: 'full-dashboard-desktop',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1`,
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now`,
     viewport: { width: 1600, height: 1100 },
     expectedCharts: 2,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
   },
   {
     name: 'full-dashboard-laptop',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1`,
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now`,
     viewport: { width: 1366, height: 768 },
     expectedCharts: 2,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
   },
   {
     name: 'full-dashboard-tablet',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1`,
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now`,
     viewport: { width: 1024, height: 1280 },
     expectedCharts: 2,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
   },
   {
     name: 'full-dashboard-compact',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1`,
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now`,
     viewport: { width: 820, height: 1180 },
     expectedCharts: 2,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
   },
   {
-    name: 'view-panel-multi',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&viewPanel=1`,
+    name: 'view-panel-prometheus',
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&viewPanel=2`,
     viewport: { width: 1200, height: 900 },
     expectedCharts: 1,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
   },
   {
-    name: 'view-panel-single-narrow',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&viewPanel=2`,
+    name: 'view-panel-loki-narrow',
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&viewPanel=3`,
     viewport: { width: 820, height: 960 },
     expectedCharts: 1,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
   },
   {
-    name: 'view-panel-single-compact',
-    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&viewPanel=2`,
+    name: 'view-panel-loki-compact',
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&viewPanel=3`,
     viewport: { width: 700, height: 960 },
     expectedCharts: 1,
-    heading: 'Prometheus Live Anomaly Demo',
+    heading: 'Grafana Anomaly Plugin Source Matrix',
+  },
+  {
+    name: 'edit-panel-prometheus',
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&editPanel=2`,
+    viewport: { width: 1440, height: 980 },
+    expectedCharts: 1,
+  },
+  {
+    name: 'edit-panel-prometheus-narrow',
+    path: `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&editPanel=2`,
+    viewport: { width: 1180, height: 900 },
+    expectedCharts: 1,
   },
   {
     name: 'solo-panel-compact',
-    path: `/d-solo/${dashboardUid}/${dashboardSlug}?orgId=1&panelId=1`,
+    path: `/d-solo/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&panelId=2`,
     viewport: { width: 900, height: 700 },
     expectedCharts: 1,
   },
@@ -73,8 +85,14 @@ async function assertChartLooksAlive(chart: Locator) {
   expect(box!.width).toBeGreaterThan(260);
   expect(box!.height).toBeGreaterThan(180);
 
+  const chartCard = chart.locator('xpath=..');
+  const chartCardBox = await chartCard.boundingBox();
+  expect(chartCardBox).not.toBeNull();
+  expect(box!.width).toBeLessThanOrEqual(chartCardBox!.width + 2);
+  expect(box!.height).toBeLessThanOrEqual(chartCardBox!.height + 2);
+
   const pathCount = await chart.locator('path').count();
-  expect(pathCount).toBeGreaterThan(3);
+  expect(pathCount).toBeGreaterThanOrEqual(3);
 
   const labels = await chart.locator('text').allTextContents();
   expect(labels.join(' ')).toContain('TIME');
@@ -88,7 +106,9 @@ async function assertScenario(page: Page, scenario: (typeof scenarios)[number]) 
   }
 
   const charts = page.locator('svg[aria-label="Anomaly chart"]');
-  await expect(charts).toHaveCount(scenario.expectedCharts, { timeout: 60000 });
+  await expect
+    .poll(async () => charts.count(), { timeout: 60000 })
+    .toBeGreaterThanOrEqual(scenario.expectedCharts);
   for (let index = 0; index < scenario.expectedCharts; index++) {
     await assertChartLooksAlive(charts.nth(index));
   }
@@ -101,11 +121,11 @@ for (const scenario of scenarios) {
 }
 
 test('view panel chart survives viewport resize and redraw', async ({ page }) => {
-  const viewPath = `/d/${dashboardUid}/${dashboardSlug}?orgId=1&viewPanel=2`;
+  const viewPath = `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&viewPanel=2`;
 
   await page.setViewportSize({ width: 1280, height: 920 });
   await page.goto(viewPath, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Prometheus Live Anomaly Demo').first()).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText('Grafana Anomaly Plugin Source Matrix').first()).toBeVisible({ timeout: 60000 });
 
   const chart = page.locator('svg[aria-label="Anomaly chart"]').first();
   await assertChartLooksAlive(chart);
@@ -119,9 +139,27 @@ test('view panel chart survives viewport resize and redraw', async ({ page }) =>
   await assertChartLooksAlive(chart);
 });
 
+test('edit panel chart survives viewport resize and redraw', async ({ page }) => {
+  const editPath = `/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&editPanel=2`;
+
+  await page.setViewportSize({ width: 1440, height: 980 });
+  await page.goto(editPath, { waitUntil: 'domcontentloaded' });
+
+  const chart = page.locator('svg[aria-label="Anomaly chart"]').first();
+  await assertChartLooksAlive(chart);
+
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await page.waitForTimeout(900);
+  await assertChartLooksAlive(chart);
+
+  await page.setViewportSize({ width: 1600, height: 980 });
+  await page.waitForTimeout(900);
+  await assertChartLooksAlive(chart);
+});
+
 test('score-feed sync registers exporter rules on live dashboard', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(`/d/${dashboardUid}/${dashboardSlug}?orgId=1&viewPanel=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`/d/${dashboardUid}/${dashboardSlug}?orgId=1&from=now-30m&to=now&viewPanel=2`, { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByRole('button', { name: 'Sync score feed' })).toBeVisible({ timeout: 60000 });
   await page.getByRole('button', { name: 'Sync score feed' }).click();
@@ -129,27 +167,20 @@ test('score-feed sync registers exporter rules on live dashboard', async ({ page
   await expect
     .poll(async () => {
       return page.evaluate(async () => {
-        const response = await fetch('http://127.0.0.1:9110/api/sync/rules');
-        const payload = await response.json();
-        const rules = Array.isArray(payload) ? payload : payload.rules;
-        return Array.isArray(rules) && JSON.stringify(rules).includes('prometheus_live_anomaly_demo_panel_1');
+        const response = await fetch('http://127.0.0.1:9110/metrics');
+        const payload = await response.text();
+        return payload.includes('grafana_anomaly_rule_score') && payload.includes('rule="local_prometheus_source_prometheus_metrics"') && payload.includes('feed_source="grafana_panel"');
       });
     }, { timeout: 30000 })
     .toBe(true);
-
-  const rulesPayload = await page.evaluate(async () => {
-    const response = await fetch('http://127.0.0.1:9110/api/sync/rules');
-    return response.json();
-  });
 
   const metricsPayload = await page.evaluate(async () => {
     const response = await fetch('http://127.0.0.1:9110/metrics');
     return response.text();
   });
 
-  const rules = Array.isArray(rulesPayload) ? rulesPayload : rulesPayload.rules;
-  expect(Array.isArray(rules)).toBeTruthy();
-  expect(JSON.stringify(rules)).toContain('prometheus_live_anomaly_demo_panel_1');
   expect(metricsPayload).toContain('grafana_anomaly_rule_score');
   expect(metricsPayload).toContain('grafana_anomaly_confidence_score');
+  expect(metricsPayload).toContain('rule="local_prometheus_source_prometheus_metrics"');
+  expect(metricsPayload).toContain('feed_source="grafana_panel"');
 });

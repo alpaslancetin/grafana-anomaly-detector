@@ -1,0 +1,154 @@
+services:
+  synthetic-metrics:
+    build:
+      context: ../prometheus-live-demo/synthetic_exporter
+    container_name: anomaly_multi_synthetic_metrics
+    mem_limit: 128m
+    memswap_limit: 192m
+    restart: unless-stopped
+    ports:
+      - "9108:9108"
+
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    container_name: anomaly_multi_prometheus
+    mem_limit: 384m
+    memswap_limit: 512m
+    restart: unless-stopped
+    depends_on:
+      - synthetic-metrics
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090"
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: anomaly_multi_loki
+    mem_limit: 384m
+    memswap_limit: 512m
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+
+  influxdb:
+    image: influxdb:2.7.11
+    container_name: anomaly_multi_influxdb
+    mem_limit: 384m
+    memswap_limit: 512m
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: anomaly
+      DOCKER_INFLUXDB_INIT_PASSWORD: anomaly-password
+      DOCKER_INFLUXDB_INIT_ORG: anomaly
+      DOCKER_INFLUXDB_INIT_BUCKET: anomaly
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: anomaly-demo-token
+    ports:
+      - "8086:8086"
+
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: anomaly_multi_postgres
+    mem_limit: 900m
+    memswap_limit: 1024m
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: anomaly
+      POSTGRES_PASSWORD: anomaly-password
+      POSTGRES_DB: anomaly
+    ports:
+      - "5432:5432"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.4.13-alpine
+    container_name: anomaly_multi_clickhouse
+    mem_limit: 1024m
+    memswap_limit: 1280m
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: anomaly_multi_elasticsearch
+    mem_limit: 1300m
+    memswap_limit: 1536m
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+
+  anomaly-exporter:
+    build:
+      context: ../prometheus-live-demo/anomaly_exporter
+      args:
+        INSTALL_POSTGRESQL_SINK: "true"
+    container_name: anomaly_multi_exporter
+    mem_limit: 256m
+    memswap_limit: 384m
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - loki
+      - influxdb
+      - postgres
+      - clickhouse
+      - elasticsearch
+    environment:
+      ANOMALY_CONFIG_PATH: /app/config.yml
+      ANOMALY_DYNAMIC_RULES_PATH: /app/state/dynamic_rules.json
+      ANOMALY_SINK_INFLUX_TOKEN: anomaly-demo-token
+      ANOMALY_SINK_PG_DSN: postgresql://anomaly:anomaly-password@postgres:5432/anomaly
+      ANOMALY_SOURCE_PROMETHEUS_URL: http://prometheus:9090
+      ANOMALY_SOURCE_LOKI_URL: http://loki:3100
+      ANOMALY_SOURCE_INFLUXDB_URL: http://influxdb:8086
+      ANOMALY_SOURCE_INFLUX_ORG: anomaly
+      ANOMALY_SOURCE_INFLUX_TOKEN: anomaly-demo-token
+      ANOMALY_SOURCE_POSTGRESQL_URL: postgresql://anomaly:anomaly-password@postgres:5432/anomaly
+      ANOMALY_SOURCE_PG_DSN: postgresql://anomaly:anomaly-password@postgres:5432/anomaly
+      ANOMALY_SOURCE_CLICKHOUSE_URL: http://clickhouse:8123
+      ANOMALY_SOURCE_ELASTICSEARCH_URL: http://elasticsearch:9200/grafana-anomaly-*
+    volumes:
+      - ./exporter/config.yml:/app/config.yml:ro
+      - ./exporter/state:/app/state
+    ports:
+      - "9110:9110"
+
+  grafana:
+    image: grafana/grafana-enterprise:12.4.0
+    container_name: anomaly_multi_grafana
+    mem_limit: 650m
+    memswap_limit: 768m
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - loki
+      - influxdb
+      - postgres
+      - clickhouse
+      - elasticsearch
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: alpas-anomalydetector-panel,custom-oracle-datasource
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - ../grafana-anomaly-detector-panel/dist:/var/lib/grafana/plugins/alpas-anomalydetector-panel:ro
+      - C:/Users/alpas/Documents/CodexSample/grafana-oracle-plugin/.local/grafana-plugins/custom-oracle-datasource:/var/lib/grafana/plugins/custom-oracle-datasource:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"

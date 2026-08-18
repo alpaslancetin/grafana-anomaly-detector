@@ -54,7 +54,7 @@ rules:
     description: Alert-ready anomaly score for checkout latency.
     query: demo_latency_ms{service="checkout",environment="demo"}
     algorithm: mad
-    threshold: 2.4
+    threshold: 4.0
     baseline_window: 12
     severity_preset: page_first
     aggregation: max
@@ -66,7 +66,7 @@ rules:
     description: Alert-ready anomaly score for checkout request throughput.
     query: demo_requests_per_second{service="checkout",environment="demo"}
     algorithm: ewma
-    threshold: 2.1
+    threshold: 4.5
     baseline_window: 14
     severity_preset: warning_first
     aggregation: max
@@ -78,7 +78,7 @@ rules:
     description: Alert-ready anomaly score for checkout error percentage.
     query: demo_error_rate_percent{service="checkout",environment="demo"}
     algorithm: mad
-    threshold: 2.6
+    threshold: 4.2
     baseline_window: 18
     severity_preset: page_first
     aggregation: max

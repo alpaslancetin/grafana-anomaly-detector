@@ -36,7 +36,7 @@
       "id": 1,
       "options": {
         "title": "Prometheus latency anomaly (multi metric)",
-        "sensitivity": 2.4,
+        "sensitivity": 4.0,
         "baselineWindow": 12,
         "maxAnomalies": 8,
         "showBands": true,

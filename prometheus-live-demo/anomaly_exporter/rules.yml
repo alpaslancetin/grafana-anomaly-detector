@@ -6,12 +6,41 @@ global:
   listen_port: 9110
   config_reload_interval_seconds: 10
 
+# Optional multi-datasource anomaly feed sinks. Leave unset or disabled to keep
+# the Prometheus-only exporter behavior.
+# sinks:
+#   loki:
+#     enabled: true
+#     url: http://loki:3100
+#     labels: { job: grafana_anomaly_exporter, env: demo }
+#   influxdb:
+#     enabled: true
+#     url: http://influxdb:8086
+#     version: 2
+#     org: anomaly
+#     bucket: anomaly
+#     token_env: ANOMALY_SINK_INFLUX_TOKEN
+#   postgresql:
+#     enabled: true
+#     dsn_env: ANOMALY_SINK_PG_DSN
+#     table: grafana_anomaly_scores
+#     auto_create_table: true
+#   clickhouse:
+#     enabled: true
+#     url: http://clickhouse:8123
+#     database: default
+#     table: grafana_anomaly_scores
+#   elasticsearch:
+#     enabled: true
+#     url: http://elasticsearch:9200
+#     index_prefix: grafana-anomaly
+
 rules:
   - name: checkout_latency
     description: Alert-ready anomaly score for checkout latency.
     query: demo_latency_ms{service="checkout",environment="demo"}
     algorithm: mad
-    threshold: 2.4
+    threshold: 4.0
     baseline_window: 12
     severity_preset: page_first
     aggregation: max
@@ -23,7 +52,7 @@ rules:
     description: Alert-ready anomaly score for checkout request throughput.
     query: demo_requests_per_second{service="checkout",environment="demo"}
     algorithm: ewma
-    threshold: 2.1
+    threshold: 4.5
     baseline_window: 14
     severity_preset: warning_first
     aggregation: max
@@ -35,7 +64,7 @@ rules:
     description: Alert-ready anomaly score for checkout error percentage.
     query: demo_error_rate_percent{service="checkout",environment="demo"}
     algorithm: mad
-    threshold: 2.6
+    threshold: 4.2
     baseline_window: 18
     severity_preset: page_first
     aggregation: max

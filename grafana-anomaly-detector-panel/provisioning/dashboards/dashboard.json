@@ -36,7 +36,7 @@
       "id": 1,
       "options": {
         "title": "Synthetic anomaly stream",
-        "sensitivity": 2.4,
+        "sensitivity": 4.0,
         "baselineWindow": 4,
         "maxAnomalies": 6,
         "showBands": true,
