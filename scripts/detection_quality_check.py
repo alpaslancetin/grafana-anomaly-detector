@@ -34,8 +34,8 @@ PROFILES = {
     'zscore': AlgorithmProfile(4.0, 12),
     'mad': AlgorithmProfile(4.0, 12),
     'ewma': AlgorithmProfile(4.5, 30),
-    'seasonal': AlgorithmProfile(4.5, 8),
-    'level_shift': AlgorithmProfile(6.0, 30),
+    'seasonal': AlgorithmProfile(4.0, 8),
+    'level_shift': AlgorithmProfile(5.0, 30),
 }
 
 
@@ -142,6 +142,16 @@ def main() -> int:
             failures.append(f'clear/{algorithm}: false-positive rate above 5%')
     if clear['level_shift']['shift_onset'] < 0 or clear['level_shift']['shift_onset'] > 12:
         failures.append('clear/level_shift: sustained shift not detected within 12 buckets')
+    hard = results['hard']
+    for algorithm in ('zscore', 'mad', 'ewma'):
+        if hard[algorithm]['event_recall'] < 0.6:
+            failures.append(f'hard/{algorithm}: event recall below 0.6')
+        if hard[algorithm]['false_positive_rate'] > 0.05:
+            failures.append(f'hard/{algorithm}: false-positive rate above 5%')
+    if hard['seasonal']['shift_onset'] < 0 or hard['seasonal']['shift_onset'] > 12:
+        failures.append('hard/seasonal: seasonal shift not detected within 12 buckets')
+    if hard['level_shift']['event_recall'] < 0.6 or hard['level_shift']['shift_onset'] < 0 or hard['level_shift']['shift_onset'] > 12:
+        failures.append('hard/level_shift: difficult sustained change gate failed')
     if any(metrics['points_per_second'] < 10_000 for metrics in clear.values()):
         failures.append('clear: scorer throughput below 10k points/s')
 

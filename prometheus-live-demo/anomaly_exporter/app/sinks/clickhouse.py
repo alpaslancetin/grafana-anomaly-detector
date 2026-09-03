@@ -58,14 +58,20 @@ class ClickHouseSink(AnomalySink):
           upper_bound Nullable(Float64),
           is_anomaly UInt8,
           severity_label String,
-          algorithm String
+          algorithm String,
+          decision_state String,
+          data_state String
         ) ENGINE = MergeTree ORDER BY (rule, ts)
         '''
         encoded = urllib.parse.urlencode({'query': query})
         http_request(f'{self.url}/?{encoded}', body=b'', headers=self._headers(), timeout_seconds=self.timeout_seconds, verify=self.verify)
-        alter = f"ALTER TABLE {self.database}.{self.table} ADD COLUMN IF NOT EXISTS record_type String DEFAULT 'series'"
-        encoded_alter = urllib.parse.urlencode({'query': alter})
-        http_request(f'{self.url}/?{encoded_alter}', body=b'', headers=self._headers(), timeout_seconds=self.timeout_seconds, verify=self.verify)
+        for alter in (
+            f"ALTER TABLE {self.database}.{self.table} ADD COLUMN IF NOT EXISTS record_type String DEFAULT 'series'",
+            f"ALTER TABLE {self.database}.{self.table} ADD COLUMN IF NOT EXISTS decision_state String DEFAULT 'normal'",
+            f"ALTER TABLE {self.database}.{self.table} ADD COLUMN IF NOT EXISTS data_state String DEFAULT 'ok'",
+        ):
+            encoded_alter = urllib.parse.urlencode({'query': alter})
+            http_request(f'{self.url}/?{encoded_alter}', body=b'', headers=self._headers(), timeout_seconds=self.timeout_seconds, verify=self.verify)
 
     def _row(self, record: dict[str, object]) -> dict[str, object]:
         return {
@@ -85,6 +91,8 @@ class ClickHouseSink(AnomalySink):
             'is_anomaly': 1 if record.get('is_anomaly') else 0,
             'severity_label': str(record.get('severity_label', 'normal')),
             'algorithm': str(record.get('algorithm', 'unknown')),
+            'decision_state': str(record.get('decision_state', 'normal')),
+            'data_state': str(record.get('data_state', 'ok')),
         }
 
     def _headers(self) -> dict[str, str]:

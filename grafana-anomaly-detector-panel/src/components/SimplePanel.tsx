@@ -4,6 +4,7 @@ import { css } from '@emotion/css';
 import { useTheme2 } from '@grafana/ui';
 import { getBackendSrv } from '@grafana/runtime';
 import {
+  AnomalyDirection,
   BucketSpan,
   DetectionAlgorithm,
   DetectionMode,
@@ -31,6 +32,7 @@ type VectorLike = {
 type SeverityLabel = 'normal' | 'low' | 'medium' | 'high' | 'critical';
 type ConfidenceLabel = 'low' | 'medium' | 'high';
 type DataQualityLabel = 'healthy' | 'thin' | 'flatline' | 'gappy';
+type DecisionState = 'normal' | 'candidate' | 'open' | 'recovering' | 'cooldown' | 'warming_up';
 type EffectiveMetricPreset = Exclude<MetricPreset, 'auto' | 'custom'>;
 type AutoMatchConfidence = 'matched' | 'weak' | 'fallback';
 type RecommendationSource = 'auto' | 'selected' | 'manual';
@@ -70,6 +72,7 @@ interface SamplePoint extends RawPoint, SeverityState, ConfidenceState {
   windowScore: number;
   scoreDriver: 'point' | 'window';
   isAnomaly: boolean;
+  decisionState: DecisionState;
 }
 
 interface SeriesAnalysis {
@@ -95,6 +98,7 @@ interface MultiMetricEvent extends SeverityState, ConfidenceState {
   contributors: string[];
   activeSeries: number;
   isAnomaly: boolean;
+  decisionState: DecisionState;
 }
 
 interface SummaryItem extends SeverityState, ConfidenceState {
@@ -163,6 +167,7 @@ type SelectionDetail = PointSelectionDetail | EventSelectionDetail;
 
 interface MetricPresetConfig {
   algorithm: DetectionAlgorithm;
+  anomalyDirection: AnomalyDirection;
   sensitivity: number;
   baselineWindow: number;
   seasonalitySamples: number;
@@ -193,6 +198,16 @@ interface ResolvedOptions {
   effectiveMetricPreset: EffectiveMetricPreset | 'custom';
   detectionMode: DetectionMode;
   algorithm: DetectionAlgorithm;
+  anomalyDirection: AnomalyDirection;
+  minimumAbsoluteDeviation: number;
+  minimumRelativeDeviation: number;
+  minimumActivity: number;
+  persistenceBuckets: number;
+  persistenceWindow: number;
+  recoveryThreshold: number;
+  recoveryBuckets: number;
+  cooldownBuckets: number;
+  dataQualityGate: boolean;
   sensitivity: number;
   baselineWindow: number;
   seasonalitySamples: number;
@@ -259,6 +274,7 @@ interface HoverSeriesSnapshot extends SeverityState, ConfidenceState {
   expected: number | null;
   score: number;
   isAnomaly: boolean;
+  decisionState: DecisionState;
 }
 
 interface HoverSnapshot extends SeverityState {
@@ -337,6 +353,7 @@ interface ScoreFeedRule {
   rule: string;
   query: string;
   perSeriesQuery: string;
+  activeQuery?: string;
   target?: ScoreFeedTarget | string;
   queryLanguage?: string;
   datasourceType?: string;
@@ -349,6 +366,7 @@ interface ScoreFeedQueryVariant {
   datasourceType: string;
   query: string;
   perSeriesQuery: string;
+  activeQuery?: string;
 }
 
 interface ScoreFeedState {
@@ -367,6 +385,8 @@ interface ScoreFeedHookInput {
   options: SimpleOptions;
   resolvedOptions: ResolvedOptions;
   liveTargets: FeedQueryTarget[];
+  savedContext: PanelSyncContext | null;
+  savedContextReady: boolean;
   analyses: SeriesAnalysis[];
   timeRangeSeconds: number;
   queryStepSeconds: number;
@@ -392,6 +412,7 @@ interface ComputedScoreFeedSeriesPayload {
   normalizedScore: number;
   severityLabel: SeverityLabel;
   isAnomaly: boolean;
+  decisionState: DecisionState;
   confidenceScore: number;
   confidenceLabel: ConfidenceLabel;
   dataQualityLabel: DataQualityLabel;
@@ -420,12 +441,25 @@ interface ComputedScoreFeedPayload {
   };
   resolvedOptions: {
     algorithm: DetectionAlgorithm;
+    anomalyDirection: AnomalyDirection;
+    minimumAbsoluteDeviation: number;
+    minimumRelativeDeviation: number;
+    minimumActivity: number;
+    persistenceBuckets: number;
+    persistenceWindow: number;
+    recoveryThreshold: number;
+    recoveryBuckets: number;
+    cooldownBuckets: number;
+    dataQualityGate: boolean;
     severityPreset: SeverityPreset;
     sensitivity: number;
   };
 }
 
 interface PanelScoreFeedRegistrationPayload {
+  schemaVersion: number;
+  pluginVersion: string;
+  capabilitiesRequired: string[];
   dashboardUid: string;
   folderTitle?: string;
   dashboardTitle: string;
@@ -435,6 +469,8 @@ interface PanelScoreFeedRegistrationPayload {
   target: ScoreFeedTarget;
   source: FeedSource;
   syncHash: string;
+  scopeHash: string;
+  scopePolicy: 'saved' | 'runtime';
   targets: FeedQueryTarget[];
   resolvedOptions: {
     setupMode: SetupMode;
@@ -442,6 +478,16 @@ interface PanelScoreFeedRegistrationPayload {
     effectiveMetricPreset: EffectiveMetricPreset | 'custom';
     detectionMode: DetectionMode;
     algorithm: DetectionAlgorithm;
+    anomalyDirection: AnomalyDirection;
+    minimumAbsoluteDeviation: number;
+    minimumRelativeDeviation: number;
+    minimumActivity: number;
+    persistenceBuckets: number;
+    persistenceWindow: number;
+    recoveryThreshold: number;
+    recoveryBuckets: number;
+    cooldownBuckets: number;
+    dataQualityGate: boolean;
     sensitivity: number;
     baselineWindow: number;
     seasonalitySamples: number;
@@ -533,6 +579,7 @@ const BUCKET_SPAN_LABELS: Record<BucketSpan, string> = {
 const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> = {
   traffic: {
     algorithm: 'ewma',
+    anomalyDirection: 'high_or_low',
     sensitivity: 4.5,
     baselineWindow: 30,
     seasonalitySamples: 24,
@@ -543,6 +590,7 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   latency: {
     algorithm: 'mad',
+    anomalyDirection: 'high_mean',
     sensitivity: 4.0,
     baselineWindow: 12,
     seasonalitySamples: 24,
@@ -553,6 +601,7 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   error_rate: {
     algorithm: 'mad',
+    anomalyDirection: 'high_mean',
     sensitivity: 4.5,
     baselineWindow: 12,
     seasonalitySamples: 24,
@@ -563,6 +612,7 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   resource: {
     algorithm: 'ewma',
+    anomalyDirection: 'high_mean',
     sensitivity: 4.5,
     baselineWindow: 24,
     seasonalitySamples: 24,
@@ -573,7 +623,8 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   business: {
     algorithm: 'seasonal',
-    sensitivity: 4.5,
+    anomalyDirection: 'high_or_low',
+    sensitivity: 4.0,
     baselineWindow: 8,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
@@ -583,7 +634,8 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
   level_shift: {
     algorithm: 'level_shift',
-    sensitivity: 6.0,
+    anomalyDirection: 'high_or_low',
+    sensitivity: 5.0,
     baselineWindow: 30,
     seasonalitySamples: 24,
     seasonalRefinement: 'cycle',
@@ -593,6 +645,18 @@ const METRIC_PRESET_CONFIGS: Record<EffectiveMetricPreset, MetricPresetConfig> =
   },
 };
 const AUTO_PRESET_PRIORITY: EffectiveMetricPreset[] = ['latency', 'error_rate', 'level_shift', 'resource', 'business', 'traffic'];
+const AUTO_LOW_MEAN_PATTERNS = [
+  /(^|[^a-z0-9])(up|healthy|health|availability|uptime)([^a-z0-9]|$)/i,
+  /success[_\s-]?(rate|ratio|percent|percentage)/i,
+  /(free|available|remaining)[_\s-]?(capacity|space|slots?|connections?|bytes?)/i,
+  /(capacity|space|slots?|connections?|bytes?)[_\s-]?(free|available|remaining)/i,
+  /headroom/i,
+];
+
+const detectAutoAnomalyDirection = (metricNames: string[]): AnomalyDirection | null => {
+  const candidates = metricNames.map((value) => value.trim()).filter(Boolean);
+  return candidates.some((value) => AUTO_LOW_MEAN_PATTERNS.some((pattern) => pattern.test(value))) ? 'low_mean' : null;
+};
 
 const AUTO_PRESET_RULES: Array<{ preset: EffectiveMetricPreset; patterns: RegExp[] }> = [
   {
@@ -743,6 +807,10 @@ const getStyles = (isDark: boolean) => ({
     @media (max-width: 920px) {
       grid-template-columns: 1fr;
     }
+    @container (max-width: 760px) {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
   `,
   statusRail: css`
     position: absolute;
@@ -760,6 +828,9 @@ const getStyles = (isDark: boolean) => ({
     @media (max-width: 700px) {
       padding-left: 34px;
     }
+    @container (max-width: 520px) {
+      padding-left: 34px;
+    }
   `,
   statusIcon: css`
     position: absolute;
@@ -775,6 +846,10 @@ const getStyles = (isDark: boolean) => ({
     border: 1px solid rgba(248,113,113,0.62);
     background: rgba(127,29,29,0.22);
     box-shadow: 0 0 0 5px rgba(220,38,38,0.08);
+    @container (max-width: 760px) {
+      top: 34px;
+      transform: none;
+    }
   `,
   statusIconSvg: css`
     width: 18px;
@@ -829,6 +904,9 @@ const getStyles = (isDark: boolean) => ({
     font-size: 12px;
     font-weight: 700;
     @media (max-width: 700px) {
+      grid-template-columns: 1fr;
+    }
+    @container (max-width: 520px) {
       grid-template-columns: 1fr;
     }
   `,
@@ -887,6 +965,9 @@ const getStyles = (isDark: boolean) => ({
     align-content: stretch;
     min-width: 0;
     @media (max-width: 700px) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    @container (max-width: 520px) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   `,
@@ -988,14 +1069,57 @@ const getStyles = (isDark: boolean) => ({
       }
     }
   `,
+  legendToolbar: css`
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px;
+    gap: 8px;
+    padding: 9px 10px;
+    border-bottom: 1px solid ${isDark ? '#1E293B' : '#D7E3F4'};
+    background: ${isDark ? 'rgba(8, 13, 22, 0.55)' : '#F8FAFC'};
+    @media (max-width: 560px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  legendControl: css`
+    width: 100%;
+    min-width: 0;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid ${isDark ? '#334155' : '#CBD5E1'};
+    background: ${isDark ? '#0B1220' : '#FFFFFF'};
+    color: ${isDark ? '#E2E8F0' : '#0F172A'};
+    padding: 0 9px;
+    font-size: 11px;
+    font-weight: 650;
+    outline: none;
+    &:focus {
+      border-color: ${isDark ? '#60A5FA' : '#2563EB'};
+      box-shadow: 0 0 0 2px ${isDark ? 'rgba(96,165,250,0.16)' : 'rgba(37,99,235,0.12)'};
+    }
+  `,
   legendTableRow: css`
+    width: 100%;
     display: grid;
     grid-template-columns: minmax(180px, 1fr) 96px 84px 104px;
     gap: 10px;
     align-items: center;
     padding: 9px 12px;
+    border-top: 0;
+    border-left: 0;
+    border-right: 0;
     border-bottom: 1px solid ${isDark ? 'rgba(30,41,59,0.7)' : 'rgba(215,227,244,0.8)'};
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
     font-size: 12px;
+    &:hover {
+      background: ${isDark ? 'rgba(59,130,246,0.09)' : 'rgba(37,99,235,0.06)'};
+    }
+    &:focus-visible {
+      outline: 2px solid ${isDark ? '#60A5FA' : '#2563EB'};
+      outline-offset: -2px;
+    }
     &:last-child {
       border-bottom: 0;
     }
@@ -2157,6 +2281,22 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
       effectiveMetricPreset: 'custom',
       detectionMode: options.detectionMode ?? 'single',
       algorithm: options.algorithm ?? 'zscore',
+      anomalyDirection: options.anomalyDirection ?? 'high_or_low',
+      minimumAbsoluteDeviation: Math.max(0, options.minimumAbsoluteDeviation ?? 0),
+      minimumRelativeDeviation: Math.max(0, options.minimumRelativeDeviation ?? 0),
+      minimumActivity: Math.max(0, options.minimumActivity ?? 0),
+      persistenceBuckets: Math.min(
+        Math.max(1, Math.round(options.persistenceBuckets ?? 3)),
+        Math.max(1, Math.round(options.persistenceWindow ?? 4))
+      ),
+      persistenceWindow: Math.max(1, Math.round(options.persistenceWindow ?? 4)),
+      recoveryThreshold: Math.min(
+        Math.max(0, options.recoveryThreshold ?? 3),
+        Math.max(0.2, options.sensitivity ?? 4.0)
+      ),
+      recoveryBuckets: Math.max(1, Math.round(options.recoveryBuckets ?? 2)),
+      cooldownBuckets: Math.max(0, Math.round(options.cooldownBuckets ?? 2)),
+      dataQualityGate: options.dataQualityGate !== false,
       sensitivity: Math.max(0.2, options.sensitivity ?? 4.0),
       baselineWindow: Math.max(3, Math.round(options.baselineWindow ?? 12)),
       seasonalitySamples: Math.max(2, Math.round(options.seasonalitySamples ?? 24)),
@@ -2181,6 +2321,7 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
   const autoMatch = metricPreset === 'auto' ? detectAutoMetricPreset(metricNames) : null;
   const effectiveMetricPreset = (metricPreset === 'auto' ? autoMatch?.preset : metricPreset) as EffectiveMetricPreset;
   const config = METRIC_PRESET_CONFIGS[effectiveMetricPreset];
+  const autoDirection = metricPreset === 'auto' ? detectAutoAnomalyDirection(metricNames) : null;
 
   const partial: Omit<ResolvedOptions, 'recommendation'> = {
     setupMode,
@@ -2188,6 +2329,16 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
     effectiveMetricPreset,
     detectionMode: options.detectionMode ?? 'single',
     algorithm: config.algorithm,
+    anomalyDirection: autoDirection ?? config.anomalyDirection,
+    minimumAbsoluteDeviation: 0,
+    minimumRelativeDeviation: 0,
+    minimumActivity: 0,
+    persistenceBuckets: 3,
+    persistenceWindow: 4,
+    recoveryThreshold: Math.max(0.2, config.sensitivity * 0.75),
+    recoveryBuckets: 2,
+    cooldownBuckets: 2,
+    dataQualityGate: true,
     sensitivity: config.sensitivity,
     baselineWindow: config.baselineWindow,
     seasonalitySamples: config.seasonalitySamples,
@@ -2544,6 +2695,16 @@ const downsamplePoints = (points: SamplePoint[]): SamplePoint[] => {
 const analyzePoints = (points: RawPoint[], options: ResolvedOptions): SamplePoint[] => {
   return analyzeCanonicalPoints(points, {
     algorithm: options.algorithm,
+    anomalyDirection: options.anomalyDirection,
+    minimumAbsoluteDeviation: options.minimumAbsoluteDeviation,
+    minimumRelativeDeviation: options.minimumRelativeDeviation,
+    minimumActivity: options.minimumActivity,
+    persistenceBuckets: Math.min(options.persistenceBuckets, options.persistenceWindow),
+    persistenceWindow: options.persistenceWindow,
+    recoveryThreshold: options.recoveryThreshold,
+    recoveryBuckets: options.recoveryBuckets,
+    cooldownBuckets: options.cooldownBuckets,
+    dataQualityGate: options.dataQualityGate,
     sensitivity: options.sensitivity,
     baselineWindow: options.baselineWindow,
     seasonalitySamples: options.seasonalitySamples,
@@ -2617,6 +2778,7 @@ const buildMultiMetricEvents = (analyses: SeriesAnalysis[], options: ResolvedOpt
         contributors: top.filter((item) => item.point.isAnomaly).map((item) => item.label).slice(0, 4),
         activeSeries: entries.length,
         isAnomaly: score >= options.sensitivity || top.some((item) => item.point.isAnomaly),
+        decisionState: strongest?.point.decisionState ?? 'normal',
         severityLabel: severity.severityLabel,
         severityScore: severity.severityScore,
         confidenceScore: Math.round(confidenceScore * 10) / 10,
@@ -2998,6 +3160,7 @@ const buildHoverSnapshot = (
         expected: point.expected,
         score: point.score,
         isAnomaly: point.isAnomaly,
+        decisionState: point.decisionState,
         severityLabel: point.severityLabel,
         severityScore: point.severityScore,
         confidenceScore: point.confidenceScore,
@@ -3076,8 +3239,16 @@ const buildHowItWorksText = (options: ResolvedOptions, effectiveBucketSpanMs: nu
   const bucketMessage = effectiveBucketSpanMs
     ? `Dense data is first summarized into ${bucketText} buckets so the panel stays fast.`
     : 'Incoming samples are scored directly for maximum detail.';
+  const directionText =
+    options.anomalyDirection === 'high_mean'
+      ? 'Only values above the learned mean may become anomalies.'
+      : options.anomalyDirection === 'low_mean'
+        ? 'Only values below the learned mean may become anomalies.'
+        : 'Both upward and downward deviations may become anomalies.';
+  const recoveryThreshold = options.recoveryThreshold > 0 ? options.recoveryThreshold : options.sensitivity;
+  const decisionText = `${options.persistenceBuckets} of the latest ${options.persistenceWindow} buckets open an incident. It closes after ${options.recoveryBuckets} consecutive buckets below ${recoveryThreshold.toFixed(2)} and then waits ${options.cooldownBuckets} cooldown buckets.`;
 
-  return `${profileText} ${algorithmText} Current threshold is ${options.sensitivity.toFixed(2)}. ${bucketMessage}`;
+  return `${profileText} ${algorithmText} ${directionText} ${decisionText} Current threshold is ${options.sensitivity.toFixed(2)}. ${bucketMessage}`;
 };
 
 const buildIncidentGroups = (points: SamplePoint[]): SamplePoint[][] => {
@@ -3922,6 +4093,98 @@ const normalizeScoreFeedEndpoint = (value?: string): string => {
   return normalized || DEFAULT_SCORE_FEED_ENDPOINT;
 };
 
+interface ExporterErrorEnvelope {
+  error?: string | { code?: string; message?: string; requestId?: string };
+}
+
+class ExporterApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly requestId: string
+  ) {
+    super(message);
+    this.name = 'ExporterApiError';
+  }
+}
+
+const exporterErrorMessage = (method: string, url: string, response: Response, body: string): string => {
+  const contentType = response.headers.get('Content-Type') ?? 'unknown';
+  const requestId = response.headers.get('X-Request-ID') ?? 'unavailable';
+  const safeUrl = url.split(/[?#]/, 1)[0];
+  if (!body.trim()) {
+    return `${method} ${safeUrl} returned HTTP ${response.status} with an empty body. Check the exporter base path and reverse-proxy route. Request ID: ${requestId}.`;
+  }
+  if (contentType.includes('text/plain') && body.includes('grafana_anomaly_')) {
+    return `${method} ${safeUrl} reached the Prometheus metrics endpoint instead of the exporter JSON API. Check the configured base path. Request ID: ${requestId}.`;
+  }
+  if (contentType.includes('text/html')) {
+    return `${method} ${safeUrl} returned HTTP ${response.status} HTML from a proxy or upstream. Request ID: ${requestId}.`;
+  }
+  const preview = body.replace(/\s+/g, ' ').trim().slice(0, 200);
+  return `${method} ${safeUrl} returned HTTP ${response.status} (${contentType}): ${preview}. Request ID: ${requestId}.`;
+};
+
+const fetchExporterJson = async <T extends Record<string, unknown>>(url: string, init: RequestInit = {}): Promise<T> => {
+  const method = String(init.method ?? 'GET').toUpperCase();
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    throw new ExporterApiError(
+      `${method} ${url.split(/[?#]/, 1)[0]} did not receive an HTTP response. Check network reachability, TLS/mixed-content rules, and CORS. ${error instanceof Error ? error.message : ''}`.trim(),
+      0,
+      'unavailable'
+    );
+  }
+
+  const body = await response.text();
+  const requestId = response.headers.get('X-Request-ID') ?? 'unavailable';
+  const contentType = response.headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json') || !body.trim()) {
+    throw new ExporterApiError(exporterErrorMessage(method, url, response, body), response.status, requestId);
+  }
+
+  let payload: T & ExporterErrorEnvelope;
+  try {
+    payload = JSON.parse(body) as T & ExporterErrorEnvelope;
+  } catch {
+    throw new ExporterApiError(exporterErrorMessage(method, url, response, body), response.status, requestId);
+  }
+  if (!response.ok) {
+    const apiMessage = typeof payload.error === 'string' ? payload.error : payload.error?.message;
+    throw new ExporterApiError(apiMessage || exporterErrorMessage(method, url, response, body), response.status, requestId);
+  }
+  return payload;
+};
+
+const stableScopeHash = (context: PanelSyncContext): string => {
+  if (context.source === 'saved') {
+    return 'saved';
+  }
+  const source = context.targets
+    .map((target) => `${target.refId}|${target.datasourceUid}|${target.expr}`)
+    .sort()
+    .join('||');
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `runtime-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+};
+
+const targetsMatchSavedScope = (savedTargets: FeedQueryTarget[], liveTargets: FeedQueryTarget[]): boolean => {
+  if (savedTargets.length !== liveTargets.length) {
+    return false;
+  }
+  const signature = (target: FeedQueryTarget) =>
+    [target.refId, target.datasourceUid, target.datasourceType, target.expr].map((value) => value.trim()).join('|');
+  const saved = savedTargets.map(signature).sort();
+  const live = liveTargets.map(signature).sort();
+  return saved.every((value, index) => value === live[index]);
+};
+
 const sanitizeRuleName = (value: string): string => {
   const sanitized = value
     .trim()
@@ -4223,6 +4486,16 @@ const buildScoreFeedSyncHash = (
       effectiveMetricPreset: resolvedOptions.effectiveMetricPreset,
       detectionMode: resolvedOptions.detectionMode,
       algorithm: resolvedOptions.algorithm,
+      anomalyDirection: resolvedOptions.anomalyDirection,
+      minimumAbsoluteDeviation: resolvedOptions.minimumAbsoluteDeviation,
+      minimumRelativeDeviation: resolvedOptions.minimumRelativeDeviation,
+      minimumActivity: resolvedOptions.minimumActivity,
+      persistenceBuckets: resolvedOptions.persistenceBuckets,
+      persistenceWindow: resolvedOptions.persistenceWindow,
+      recoveryThreshold: resolvedOptions.recoveryThreshold,
+      recoveryBuckets: resolvedOptions.recoveryBuckets,
+      cooldownBuckets: resolvedOptions.cooldownBuckets,
+      dataQualityGate: resolvedOptions.dataQualityGate,
       sensitivity: resolvedOptions.sensitivity,
       baselineWindow: resolvedOptions.baselineWindow,
       seasonalitySamples: resolvedOptions.seasonalitySamples,
@@ -4270,6 +4543,9 @@ const buildPanelScoreFeedRegistrationPayload = (
   const fallbackRangeSeconds = Math.max(3600, historyPoints * stepSeconds);
 
   return {
+    schemaVersion: 3,
+    pluginVersion: '1.5.0',
+    capabilitiesRequired: ['idempotentSync', 'scopeIdentity', 'directionPolicy', 'decisionLifecycle'],
     dashboardUid: context.dashboardUid,
     folderTitle: context.folderTitle,
     dashboardTitle: context.dashboardTitle,
@@ -4279,6 +4555,8 @@ const buildPanelScoreFeedRegistrationPayload = (
     target,
     source: context.source,
     syncHash,
+    scopeHash: stableScopeHash(context),
+    scopePolicy: context.source === 'saved' ? 'saved' : 'runtime',
     targets: validTargets.map((item) => ({
       refId: item.refId,
       expr: item.expr,
@@ -4293,6 +4571,16 @@ const buildPanelScoreFeedRegistrationPayload = (
       effectiveMetricPreset: resolvedOptions.effectiveMetricPreset,
       detectionMode: resolvedOptions.detectionMode,
       algorithm: resolvedOptions.algorithm,
+      anomalyDirection: resolvedOptions.anomalyDirection,
+      minimumAbsoluteDeviation: resolvedOptions.minimumAbsoluteDeviation,
+      minimumRelativeDeviation: resolvedOptions.minimumRelativeDeviation,
+      minimumActivity: resolvedOptions.minimumActivity,
+      persistenceBuckets: resolvedOptions.persistenceBuckets,
+      persistenceWindow: resolvedOptions.persistenceWindow,
+      recoveryThreshold: resolvedOptions.recoveryThreshold,
+      recoveryBuckets: resolvedOptions.recoveryBuckets,
+      cooldownBuckets: resolvedOptions.cooldownBuckets,
+      dataQualityGate: resolvedOptions.dataQualityGate,
       sensitivity: resolvedOptions.sensitivity,
       baselineWindow: resolvedOptions.baselineWindow,
       seasonalitySamples: resolvedOptions.seasonalitySamples,
@@ -4336,6 +4624,7 @@ const buildComputedScoreFeedPayload = (
         normalizedScore: point.severityScore,
         severityLabel: point.severityLabel,
         isAnomaly: point.isAnomaly,
+        decisionState: point.decisionState,
         confidenceScore: point.confidenceScore,
         confidenceLabel: point.confidenceLabel,
         dataQualityLabel: point.dataQualityLabel,
@@ -4381,6 +4670,16 @@ const buildComputedScoreFeedPayload = (
     },
     resolvedOptions: {
       algorithm: resolvedOptions.algorithm,
+      anomalyDirection: resolvedOptions.anomalyDirection,
+      minimumAbsoluteDeviation: resolvedOptions.minimumAbsoluteDeviation,
+      minimumRelativeDeviation: resolvedOptions.minimumRelativeDeviation,
+      minimumActivity: resolvedOptions.minimumActivity,
+      persistenceBuckets: resolvedOptions.persistenceBuckets,
+      persistenceWindow: resolvedOptions.persistenceWindow,
+      recoveryThreshold: resolvedOptions.recoveryThreshold,
+      recoveryBuckets: resolvedOptions.recoveryBuckets,
+      cooldownBuckets: resolvedOptions.cooldownBuckets,
+      dataQualityGate: resolvedOptions.dataQualityGate,
       severityPreset: resolvedOptions.severityPreset,
       sensitivity: resolvedOptions.sensitivity,
     },
@@ -4495,6 +4794,8 @@ const useScoreFeedSync = ({
   options,
   resolvedOptions,
   liveTargets,
+  savedContext,
+  savedContextReady,
   analyses,
   timeRangeSeconds,
   queryStepSeconds,
@@ -4510,24 +4811,40 @@ const useScoreFeedSync = ({
         return;
       }
 
+      // Avoid a startup race where live data registers a runtime scope just before
+      // the saved dashboard definition arrives and registers the durable scope.
+      if (trigger === 'auto' && !savedContextReady) {
+        return;
+      }
+
       try {
         let context = buildLiveSyncContext(panelId, panelTitle, liveTargets, timeRangeSeconds, queryStepSeconds);
         let effectivePanelOptions = options;
         let endpoint = normalizeScoreFeedEndpoint(options.scoreFeedEndpoint);
 
-        if (trigger === 'auto') {
-          const savedContext = await loadSavedSyncContext(panelId, panelTitle).catch(() => null);
-          if (savedContext) {
+        if (savedContext) {
+          if (trigger === 'auto') {
             effectivePanelOptions = { ...options, ...savedContext.panelOptions };
-            context = {
-              ...savedContext,
-              targets: liveTargets.length > 0 ? liveTargets : savedContext.targets,
-              source: liveTargets.length > 0 ? 'live' : savedContext.source,
-              rangeSeconds: timeRangeSeconds,
-              stepSeconds: queryStepSeconds,
-            };
             endpoint = normalizeScoreFeedEndpoint(effectivePanelOptions.scoreFeedEndpoint);
           }
+          // Auto sync is the durable 24/7 contract: always register the saved dashboard query.
+          // Manual sync may intentionally publish a live, unsaved query while the user is editing.
+          const effectiveTargets =
+            trigger === 'auto'
+              ? savedContext.targets
+              : liveTargets.length > 0
+                ? liveTargets
+                : savedContext.targets;
+          context = {
+            ...savedContext,
+            targets: effectiveTargets,
+            source:
+              trigger === 'auto' || liveTargets.length === 0 || targetsMatchSavedScope(savedContext.targets, liveTargets)
+                ? 'saved'
+                : 'live',
+            rangeSeconds: timeRangeSeconds,
+            stepSeconds: queryStepSeconds,
+          };
         }
 
         const ruleNamePrefix = (trigger === 'auto' ? effectivePanelOptions.scoreFeedRuleNamePrefix : options.scoreFeedRuleNamePrefix) ?? '';
@@ -4583,35 +4900,40 @@ const useScoreFeedSync = ({
         }));
 
         let registrationResponsePayload: {
-          error?: string;
           registered?: ScoreFeedRule[];
           removed?: string[];
           target?: ScoreFeedTarget;
         } = {};
 
         if (registrationPayload) {
-          const registrationResponse = await fetch(`${endpoint}/api/sync/panel`, {
+          const capabilities = await fetchExporterJson<{
+            apiSchemaVersion?: number;
+            features?: string[];
+            exporterVersion?: string;
+          }>(`${endpoint}/api/capabilities`);
+          const missingCapabilities = registrationPayload.capabilitiesRequired.filter(
+            (feature) => !capabilities.features?.includes(feature)
+          );
+          if ((capabilities.apiSchemaVersion ?? 0) < registrationPayload.schemaVersion || missingCapabilities.length > 0) {
+            throw new Error(
+              `Exporter ${capabilities.exporterVersion ?? 'unknown'} is not compatible with this plugin. Missing capabilities: ${missingCapabilities.join(', ') || 'API schema v2'}. Upgrade the exporter first.`
+            );
+          }
+
+          registrationResponsePayload = await fetchExporterJson<{
+            registered?: ScoreFeedRule[];
+            removed?: string[];
+            target?: ScoreFeedTarget;
+          }>(`${endpoint}/api/sync/panel`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(registrationPayload),
           });
-
-          registrationResponsePayload = (await registrationResponse.json()) as {
-            error?: string;
-            registered?: ScoreFeedRule[];
-            removed?: string[];
-            target?: ScoreFeedTarget;
-          };
-
-          if (!registrationResponse.ok) {
-            throw new Error(registrationResponsePayload.error || `Panel registration failed with status ${registrationResponse.status}.`);
-          }
         }
 
         let responsePayload: {
-          error?: string;
           registered?: ScoreFeedRule[];
           removed?: string[];
           target?: ScoreFeedTarget;
@@ -4619,25 +4941,18 @@ const useScoreFeedSync = ({
         } = {};
 
         if (payload) {
-          const response = await fetch(`${endpoint}/api/feed/scores`, {
+          responsePayload = await fetchExporterJson<{
+            registered?: ScoreFeedRule[];
+            removed?: string[];
+            target?: ScoreFeedTarget;
+            acceptedSeries?: number;
+          }>(`${endpoint}/api/feed/scores`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(payload),
           });
-
-          responsePayload = (await response.json()) as {
-            error?: string;
-            registered?: ScoreFeedRule[];
-            removed?: string[];
-            target?: ScoreFeedTarget;
-            acceptedSeries?: number;
-          };
-
-          if (!response.ok) {
-            throw new Error(responsePayload.error || `Sync failed with status ${response.status}.`);
-          }
         }
 
         const registered = mergeScoreFeedRules(
@@ -4676,7 +4991,7 @@ const useScoreFeedSync = ({
         }));
       }
     },
-    [analyses, liveTargets, lastSyncedHash, options, panelId, panelTitle, queryStepSeconds, resolvedOptions, scoreFeedMode, timeRangeSeconds]
+    [analyses, liveTargets, lastSyncedHash, options, panelId, panelTitle, queryStepSeconds, resolvedOptions, savedContext, savedContextReady, scoreFeedMode, timeRangeSeconds]
   );
 
   useEffect(() => {
@@ -4763,7 +5078,12 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const sectionVisibility = useMemo(() => resolveSectionVisibility(options), [options]);
   const panelFallbackTitle = options.title || 'Anomaly detector';
   const dashboardUid = getDashboardUidFromLocation();
-  const [savedDashboardContext, setSavedDashboardContext] = useState<PanelSyncContext | null>(null);
+  const [loadedSavedDashboard, setLoadedSavedDashboard] = useState<{
+    dashboardUid: string;
+    context: PanelSyncContext | null;
+  } | null>(null);
+  const savedDashboardContext = loadedSavedDashboard?.dashboardUid === dashboardUid ? loadedSavedDashboard.context : null;
+  const savedDashboardContextReady = !dashboardUid || loadedSavedDashboard?.dashboardUid === dashboardUid;
   const liveTargets = useMemo(
     () => extractPrometheusTargets((((data as unknown as { request?: { targets?: unknown[] } }).request?.targets) ?? []) as unknown[]),
     [data]
@@ -4780,12 +5100,12 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     loadSavedSyncContext(id ?? 0, panelFallbackTitle)
       .then((context) => {
         if (!cancelled) {
-          setSavedDashboardContext(context);
+          setLoadedSavedDashboard({ dashboardUid, context });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setSavedDashboardContext(null);
+          setLoadedSavedDashboard({ dashboardUid, context: null });
         }
       });
 
@@ -4796,6 +5116,31 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const { analyses, effectiveBucketSpanMs } = useMemo(
     () => buildAnalyses(preparedSeries, resolvedOptions),
     [preparedSeries, resolvedOptions]
+  );
+  const [hiddenSeriesKeys, setHiddenSeriesKeys] = useState<Set<string>>(() => new Set());
+  const [isolatedSeriesKey, setIsolatedSeriesKey] = useState<string | null>(null);
+  const [legendFilter, setLegendFilter] = useState('');
+  const [legendSort, setLegendSort] = useState<'flagged' | 'score' | 'last' | 'name'>('flagged');
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      const availableKeys = new Set(analyses.map((analysis) => analysis.key));
+      setHiddenSeriesKeys((current) => {
+        const next = new Set([...current].filter((key) => availableKeys.has(key)));
+        return next.size === current.size ? current : next;
+      });
+      setIsolatedSeriesKey((current) => (current && !availableKeys.has(current) ? null : current));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [analyses]);
+  const visibleAnalyses = useMemo(
+    () =>
+      isolatedSeriesKey
+        ? analyses.filter((analysis) => analysis.key === isolatedSeriesKey)
+        : analyses.filter((analysis) => !hiddenSeriesKeys.has(analysis.key)),
+    [analyses, hiddenSeriesKeys, isolatedSeriesKey]
   );
   const events = useMemo(
     () => (resolvedOptions.detectionMode === 'multi' ? buildMultiMetricEvents(analyses, resolvedOptions) : []),
@@ -4817,6 +5162,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     options,
     resolvedOptions,
     liveTargets,
+    savedContext: savedDashboardContext,
+    savedContextReady: savedDashboardContextReady,
     analyses,
     timeRangeSeconds: panelTimeRangeSeconds,
     queryStepSeconds: panelQueryStepSeconds,
@@ -4918,9 +5265,15 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     const activeSummary = summaryItems.find((item) => selectionKey(item.selection) === activeSelectionToken) ?? summaryItems[0] ?? null;
     return buildFallbackSelectionDetail(activeSummary);
   }, [activeSelection, activeSelectionToken, analyses, events, summaryItems]);
-  const allPoints = useMemo(() => analyses.flatMap((analysis) => analysis.allPoints), [analyses]);
+  const allPoints = useMemo(
+    () => (visibleAnalyses.length > 0 ? visibleAnalyses : analyses).flatMap((analysis) => analysis.allPoints),
+    [analyses, visibleAnalyses]
+  );
   const interactionTime = pinnedTime ?? hoveredTime;
-  const hoverSnapshot = useMemo(() => buildHoverSnapshot(interactionTime, analyses, events), [interactionTime, analyses, events]);
+  const hoverSnapshot = useMemo(
+    () => buildHoverSnapshot(interactionTime, visibleAnalyses, events),
+    [interactionTime, visibleAnalyses, events]
+  );
   const scoreFeedStatusColor = getScoreFeedStatusColor(scoreFeed.kind, theme.isDark);
   const alertQueryLanguage = getAlertQueryLanguage(scoreFeed.registered);
   const selectedScoreFeedTarget = normalizeScoreFeedTarget(scoreFeed.registered[0]?.target ?? options.scoreFeedTarget);
@@ -5062,6 +5415,12 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                     <div className={styles.codeLine}>{item.query}</div>
                     <div className={styles.subtitle}>Per-series drilldown query</div>
                     <div className={styles.codeLine}>{item.perSeriesQuery}</div>
+                    {item.activeQuery ? (
+                      <>
+                        <div className={styles.subtitle}>Incident lifecycle query (open or recovering)</div>
+                        <div className={styles.codeLine}>{item.activeQuery}</div>
+                      </>
+                    ) : null}
                     {item.queryVariants && item.queryVariants.length > 0 ? (
                       <div className={styles.feedRuleList}>
                         {item.queryVariants.map((variant) => (
@@ -5077,6 +5436,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                               </span>
                             </div>
                             <div className={styles.codeLine}>{variant.query}</div>
+                            {variant.activeQuery ? <div className={styles.codeLine}>{variant.activeQuery}</div> : null}
                             <div className={styles.codeLine}>{variant.perSeriesQuery}</div>
                             <div className={styles.actionRow}>
                               <button
@@ -5198,9 +5558,18 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const showSideUtilities = sectionVisibility.detectionProfile || sectionVisibility.exports;
   const showSecondaryDock = sectionVisibility.anomalyFeed || showSideUtilities;
   const showBottomDock = sectionVisibility.seriesSummary || (sectionVisibility.scoreFeed && Boolean(scoreFeedCard));
+  const isChartOnly =
+    sectionVisibility.mainChart &&
+    !showStatusHeader &&
+    !sectionVisibility.anomalyFeed &&
+    !showBottomDock &&
+    !showSideUtilities &&
+    !sectionVisibility.inspector;
 
   const fallbackChartWidth = Math.max(width - 24, 320);
-  const fallbackChartHeight = Math.max(Math.min(showSecondaryDock ? height * 0.54 : height - 72, 500), 340);
+  const fallbackChartHeight = isChartOnly
+    ? Math.max(height - 20, 220)
+    : Math.max(Math.min(showSecondaryDock ? height * 0.54 : height - 72, 500), 340);
   const chartWidth = chartFrame.width > 0 ? Math.max(chartFrame.width, 260) : fallbackChartWidth;
   const chartHeight = chartFrame.height > 0 ? Math.max(chartFrame.height, 220) : fallbackChartHeight;
   const chartPadding = {
@@ -5255,20 +5624,20 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
           activeSelection?.kind === 'event' ? activeSelection.time : null
         )
       : [];
-  const focusBand = resolvedOptions.showFocusBand ? buildFocusBandModel(selectionDetail, analyses, uniqueTimes) : null;
-  const incidentRibbonSegments = buildIncidentRibbonSegments(analyses, events, resolvedOptions.detectionMode, uniqueTimes);
+  const focusBand = resolvedOptions.showFocusBand ? buildFocusBandModel(selectionDetail, visibleAnalyses, uniqueTimes) : null;
+  const incidentRibbonSegments = buildIncidentRibbonSegments(visibleAnalyses, events, resolvedOptions.detectionMode, uniqueTimes);
   const focusBandHeight = focusBand ? Math.max(54, Math.min(76, innerHeight * 0.2)) : 0;
   const focusBandY = focusBand ? chartPadding.top + innerHeight - focusBandHeight - 10 : chartPadding.top + innerHeight;
   const plotContentBottom = focusBand ? focusBandY - 8 : chartPadding.top + innerHeight;
-  const isDenseSeriesView = analyses.length > LEGEND_ROW_LIMIT;
+  const isDenseSeriesView = visibleAnalyses.length > LEGEND_ROW_LIMIT;
   const inlineLabelAnalyses =
     isDenseSeriesView
       ? []
-      : analyses.length > INLINE_SERIES_LABEL_LIMIT
-      ? [...analyses]
+      : visibleAnalyses.length > INLINE_SERIES_LABEL_LIMIT
+      ? [...visibleAnalyses]
           .sort((left, right) => right.maxSeverityScore - left.maxSeverityScore || right.anomalyCount - left.anomalyCount || left.label.localeCompare(right.label))
           .slice(0, INLINE_SERIES_LABEL_LIMIT)
-      : analyses;
+      : visibleAnalyses;
   const inlineSeriesLabels = resolvedOptions.showInlineSeriesLabels && !isDenseSeriesView
     ? buildInlineSeriesLabels(inlineLabelAnalyses, getX, getY, chartPadding.top + 12, plotContentBottom - 10, chartWidth - chartPadding.right - 10)
     : [];
@@ -5354,13 +5723,23 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     ? liveTargets[0].datasourceType.charAt(0).toUpperCase() + liveTargets[0].datasourceType.slice(1)
     : SCORE_FEED_TARGET_LABELS[normalizeScoreFeedTarget(options.scoreFeedTarget)];
   const severityLegendEntries: SeverityLabel[] = ['critical', 'high', 'medium', 'low'];
-  const legendAnalyses =
-    analyses.length > LEGEND_ROW_LIMIT
-      ? [...analyses]
-          .sort((left, right) => right.anomalyCount - left.anomalyCount || right.maxSeverityScore - left.maxSeverityScore || left.label.localeCompare(right.label))
-          .slice(0, LEGEND_ROW_LIMIT)
-      : analyses;
-  const hiddenLegendCount = Math.max(0, analyses.length - legendAnalyses.length);
+  const normalizedLegendFilter = legendFilter.trim().toLocaleLowerCase();
+  const legendAnalyses = [...analyses]
+    .filter((analysis) => !normalizedLegendFilter || analysis.label.toLocaleLowerCase().includes(normalizedLegendFilter))
+    .sort((left, right) => {
+      if (legendSort === 'name') {
+        return left.label.localeCompare(right.label);
+      }
+      if (legendSort === 'score') {
+        return right.maxSeverityScore - left.maxSeverityScore || right.anomalyCount - left.anomalyCount;
+      }
+      if (legendSort === 'last') {
+        const leftValue = left.allPoints[left.allPoints.length - 1]?.value ?? Number.NEGATIVE_INFINITY;
+        const rightValue = right.allPoints[right.allPoints.length - 1]?.value ?? Number.NEGATIVE_INFINITY;
+        return rightValue - leftValue || left.label.localeCompare(right.label);
+      }
+      return right.anomalyCount - left.anomalyCount || right.maxSeverityScore - left.maxSeverityScore || left.label.localeCompare(right.label);
+    });
   const selectedRect = selectionDetail
     ? {
         x: getX(selectionDetail.bucketStart),
@@ -5709,6 +6088,9 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                       <span>
                         Algorithm: <span className={styles.metaAccent}>{resolvedOptions.algorithm}</span>
                       </span>
+                      <span>
+                        Direction: <span className={styles.metaAccent}>{resolvedOptions.anomalyDirection.replaceAll('_', ' ')}</span>
+                      </span>
                       <span>Bucket: {bucketSpanLabel}</span>
                       <span>Series: {truncateLabel(selectedSeriesLabel, 34)}</span>
                       <span>Datasource: {headerDatasourceLabel}</span>
@@ -5722,7 +6104,13 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                 </>
               ) : null}
               {sectionVisibility.statistics ? <div className={styles.statusStats}>
-              <div className={`${styles.statCard} ${styles.statCardPrimary}`}>
+              <div
+                className={`${styles.statCard} ${styles.statCardPrimary}`}
+                style={{
+                  borderColor: `${peakSeverityColor}99`,
+                  background: `linear-gradient(145deg, ${peakSeverityColor}E6 0%, ${peakSeverityColor}88 100%)`,
+                }}
+              >
                 <div className={styles.statLabel}>Severity</div>
                 <div className={styles.statValue}>{SEVERITY_LABELS[peakSeverity.severityLabel]}</div>
                 <div className={styles.statCaption}>
@@ -5848,6 +6236,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
 
       {sectionVisibility.mainChart ? <div
         className={styles.chartCard}
+        style={isChartOnly ? { minHeight: Math.max(height - 20, 220), height: '100%' } : undefined}
         ref={chartCardRef}
         tabIndex={0}
         onKeyDown={handleChartKeyDown}
@@ -6007,7 +6396,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
             </g>
           ) : null}
           <g clipPath={`url(#${plotClipId})`}>
-          {analyses.map((analysis) => {
+          {visibleAnalyses.map((analysis) => {
             const areaPath = options.showBands === false ? '' : buildAreaPath(analysis.points, getX, getY);
             const actualPath = buildLinePath(analysis.points, getX, getY, (point) => point.value);
             const expectedPath = resolvedOptions.showExpectedLine ? buildLinePath(analysis.points, getX, getY, (point) => point.expected) : '';
@@ -6232,8 +6621,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                 ) : null}
               </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {hoverSnapshot.series.slice(0, 4).map((series) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+              {hoverSnapshot.series.map((series) => (
                 <div
                   key={`tooltip-${series.key}`}
                   style={{
@@ -6268,7 +6657,30 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
         className={styles.bottomDock}
         style={{ gridTemplateColumns: sectionVisibility.seriesSummary && sectionVisibility.scoreFeed && scoreFeedCard ? undefined : 'minmax(0, 1fr)' }}
       >
-        {sectionVisibility.seriesSummary ? <div className={styles.legendTable} aria-label="Series anomaly summary">
+        {sectionVisibility.seriesSummary ? <div className={styles.legendTable} aria-label="Series anomaly summary" style={{ maxHeight: 390, overflowY: 'auto' }}>
+          {seriesCount > 8 ? (
+            <div className={styles.legendToolbar}>
+              <input
+                className={styles.legendControl}
+                type="search"
+                value={legendFilter}
+                onChange={(event) => setLegendFilter(event.currentTarget.value)}
+                placeholder={`Search ${seriesCount} series`}
+                aria-label="Search series legend"
+              />
+              <select
+                className={styles.legendControl}
+                value={legendSort}
+                onChange={(event) => setLegendSort(event.currentTarget.value as typeof legendSort)}
+                aria-label="Sort series legend"
+              >
+                <option value="flagged">Most flagged</option>
+                <option value="score">Highest alert score</option>
+                <option value="last">Highest last value</option>
+                <option value="name">Series name</option>
+              </select>
+            </div>
+          ) : null}
           <div className={styles.legendTableHeader}>
             <span>Series ({seriesCount})</span>
             <span>Flagged</span>
@@ -6278,7 +6690,30 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
           {legendAnalyses.map((analysis) => {
             const lastPoint = analysis.allPoints[analysis.allPoints.length - 1] ?? null;
             return (
-              <div key={analysis.key} className={styles.legendTableRow} title={`${analysis.label} | ${analysis.anomalyCount} flagged buckets | max ${formatScoreValue(analysis.maxSeverityScore)}`}>
+              <button
+                key={analysis.key}
+                type="button"
+                className={styles.legendTableRow}
+                aria-pressed={isolatedSeriesKey === analysis.key}
+                title={`${analysis.label} | click to isolate; Ctrl/Cmd+click toggles visibility | ${analysis.anomalyCount} flagged buckets | max ${formatScoreValue(analysis.maxSeverityScore)}`}
+                style={{ opacity: hiddenSeriesKeys.has(analysis.key) && isolatedSeriesKey !== analysis.key ? 0.42 : 1 }}
+                onClick={(event) => {
+                  if (event.ctrlKey || event.metaKey) {
+                    setIsolatedSeriesKey(null);
+                    setHiddenSeriesKeys((current) => {
+                      const next = new Set(current);
+                      if (next.has(analysis.key)) {
+                        next.delete(analysis.key);
+                      } else {
+                        next.add(analysis.key);
+                      }
+                      return next;
+                    });
+                    return;
+                  }
+                  setIsolatedSeriesKey((current) => (current === analysis.key ? null : analysis.key));
+                }}
+              >
                 <span className={styles.legendSeriesName}>
                   <span className={styles.legendSwatch} style={{ background: analysis.color }} />
                   <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{analysis.label}</span>
@@ -6288,15 +6723,17 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                 </span>
                 <span className={styles.legendValue}>{formatScoreValue(analysis.maxSeverityScore)}</span>
                 <span className={styles.legendValue}>{lastPoint ? formatValue(lastPoint.value) : 'n/a'}</span>
-              </div>
+              </button>
             );
           })}
-          {hiddenLegendCount > 0 ? (
-            <div className={styles.legendTableFooter}>
-              <span>Showing top {legendAnalyses.length} active series</span>
-              <span>+{hiddenLegendCount} more hidden to keep the panel readable</span>
-            </div>
-          ) : null}
+          {legendAnalyses.length === 0 ? <div className={styles.incidentRibbonEmpty}>No series match this search.</div> : null}
+          <div className={styles.legendTableFooter}>
+            <span>{isolatedSeriesKey ? '1 series isolated' : `${visibleAnalyses.length} of ${seriesCount} visible${normalizedLegendFilter ? ` · ${legendAnalyses.length} matched` : ''}`}</span>
+            <span style={{ display: 'flex', gap: 6 }}>
+              <button type="button" className={styles.actionButtonSecondary} onClick={() => { setHiddenSeriesKeys(new Set()); setIsolatedSeriesKey(null); }}>Show all</button>
+              <button type="button" className={styles.actionButtonSecondary} onClick={() => { setHiddenSeriesKeys(new Set(analyses.map((analysis) => analysis.key))); setIsolatedSeriesKey(null); }}>Hide all</button>
+            </span>
+          </div>
         </div> : null}
         {sectionVisibility.scoreFeed ? scoreFeedCard : null}
       </div> : null}
@@ -6696,6 +7133,10 @@ export const __testables = {
   collectPreparedSeries,
   resolveSectionVisibility,
   normalizeScoreFeedEndpoint,
+  fetchExporterJson,
+  stableScopeHash,
+  targetsMatchSavedScope,
+  detectAutoAnomalyDirection,
   extractPrometheusTargets,
   buildMetricHintNames,
   buildScoreFeedSyncHash,

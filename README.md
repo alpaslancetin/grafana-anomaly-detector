@@ -11,7 +11,7 @@
 <p align="center">
   <img alt="Grafana compatibility" src="https://img.shields.io/badge/Grafana-11.6.7%2B-F46800?style=for-the-badge&logo=grafana&logoColor=white">
   <img alt="Validated versions" src="https://img.shields.io/badge/Validated-11.6.7%20%7C%2012.4.0-0F172A?style=for-the-badge">
-  <img alt="Plugin version" src="https://img.shields.io/badge/Plugin-v1.4.0-2563EB?style=for-the-badge">
+  <img alt="Plugin version" src="https://img.shields.io/badge/Plugin-v1.5.0-2563EB?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-16A34A?style=for-the-badge">
 </p>
 
@@ -135,7 +135,11 @@ The exporter receives plugin-computed score snapshots from Grafana panels and ex
 **Main exported metrics**
 
 - `grafana_anomaly_rule_score`
+- `grafana_anomaly_rule_is_anomaly`
+- `grafana_anomaly_rule_data_state`
+- `grafana_anomaly_rule_last_data_timestamp_seconds`
 - `grafana_anomaly_score`
+- `grafana_anomaly_decision_state`
 - `grafana_anomaly_confidence_score`
 
 **Minimum Python requirement**
@@ -145,7 +149,7 @@ The exporter receives plugin-computed score snapshots from Grafana panels and ex
 
 **Release package**
 
-- [`release/grafana-anomaly-exporter-bundle-1.4.0.zip`](release/grafana-anomaly-exporter-bundle-1.4.0.zip)
+- [`release/grafana-anomaly-exporter-bundle-1.5.0.zip`](release/grafana-anomaly-exporter-bundle-1.5.0.zip)
 
 **Installation notes**
 
@@ -165,12 +169,22 @@ The exporter receives plugin-computed score snapshots from Grafana panels and ex
 **Important behavior**
 
 - Canonical alert score is the panel-visible `0-100` severity score, exposed as `grafana_anomaly_score` and `grafana_anomaly_rule_score`.
+- Detection direction is explicit and shared by the panel and exporter: `high_mean`, `low_mean`, or `high_or_low`. Recommended mode selects it from metric semantics; Advanced mode lets the user override it.
+- Optional absolute/relative deviation floors, minimum activity, N-of-M persistence, and the data-quality gate are applied identically by the panel and exporter.
+- Recovery uses a lower threshold, consecutive recovery buckets, and an optional cooldown so alerts do not flap around the opening threshold.
 - The panel uses the TypeScript canonical scorer; the exporter uses the matching Python canonical scorer.
 - For parity mode, exporter rules use range metadata (`range_seconds`, `step_seconds`, `bucket_span_seconds`) so the same source range, bucketing, and trailing-window semantics are used.
 - If the new source/range fields and `sinks:` are omitted, the legacy Prometheus instant-query metrics path remains available.
 - Plugin-computed feeds are still supported for any Grafana datasource that returns numeric time-series data.
 - Alert query/export actions follow the selected score feed target instead of forcing PromQL: Loki returns LogQL, InfluxDB returns Flux, PostgreSQL/ClickHouse return SQL, and Elasticsearch returns an Elasticsearch query spec.
-- Removing a dashboard does **not** automatically clean synced exporter rules.
+- Saved rules remain durable. Runtime scopes expire through `runtime_scope_ttl_seconds`, and a removed panel can explicitly unregister its scope through `DELETE /api/sync/panel`.
+
+Operational health endpoints:
+
+- `/health/live`: HTTP process is alive.
+- `/health/ready`: configuration and dynamic state are usable.
+- `/health/dependencies`: configured sink health and last-write state.
+- `/api/capabilities`: API schema, lifecycle features, and request quotas. Current API schema is `3`.
 
 Parity proof:
 
@@ -186,7 +200,7 @@ Expected proof line:
 
 ## 🔁 Multi-datasource anomaly feed
 
-Exporter `v1.4.0` keeps the existing Prometheus exposition path and can also write canonical anomaly score snapshots to additional backends. The source datasource and target sink are independent: for example, a PostgreSQL-backed source can produce anomaly scores and write those score records to Elasticsearch.
+Exporter `v1.5.0` keeps the existing Prometheus exposition path and can also write canonical anomaly score snapshots to additional backends. The source datasource and target sink are independent: for example, a PostgreSQL-backed source can produce anomaly scores and write those score records to Elasticsearch.
 
 Supported sources:
 
@@ -311,7 +325,8 @@ The plugin manifest declares:
 ### Runtime
 
 - Grafana `>= 11.6.7`
-- Prometheus, only if you want score-feed based alerting
+- Python `>= 3.9` for the exporter
+- Prometheus only when Prometheus is the source or selected score-feed target; direct Loki, InfluxDB, PostgreSQL, ClickHouse, and Elasticsearch score targets do not require Prometheus
 
 ### Development
 
@@ -363,12 +378,13 @@ docker compose up -d --build
 Main outputs under [`release/`](release):
 
 - `grafana-anomaly-detector-plugin.zip`
-- `grafana-anomaly-exporter-bundle-1.4.0.zip`
+- `grafana-anomaly-exporter-bundle-1.5.0.zip`
 
 Release package notes:
 
 - [`release/README.md`](release/README.md)
-- [`release/GITHUB_RELEASE_NOTES_v1.4.0.md`](release/GITHUB_RELEASE_NOTES_v1.4.0.md)
+- [`release/GITHUB_RELEASE_NOTES_v1.5.0.md`](release/GITHUB_RELEASE_NOTES_v1.5.0.md)
+- [`release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md`](release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md)
 
 ## 🛠️ Typical alerting path
 

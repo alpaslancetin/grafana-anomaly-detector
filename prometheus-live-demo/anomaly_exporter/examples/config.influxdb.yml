@@ -10,6 +10,13 @@ global:
   listen_host: 0.0.0.0
   listen_port: 9110
   config_reload_interval_seconds: 10
+  max_dynamic_rules: 5000
+  max_rules_per_panel: 50
+  max_query_length: 16384
+  max_feed_series: 1000
+  runtime_scope_ttl_seconds: 3600
+  pushed_feed_ttl_seconds: 300
+  api_rate_limit_per_minute: 120
 
 sinks:
   influxdb:
@@ -33,8 +40,19 @@ rules:
     step_seconds: 30
     bucket_span_seconds: 60
     algorithm: mad
+    # Latency is normally upper-only; use low_mean for drop-sensitive metrics.
+    anomaly_direction: high_mean
     threshold: 4.0
     baseline_window: 12
+    minimum_absolute_deviation: 0
+    minimum_relative_deviation: 0
+    minimum_activity: 0
+    persistence_buckets: 3
+    persistence_window: 4
+    recovery_threshold: 3.0
+    recovery_buckets: 2
+    cooldown_buckets: 2
+    data_quality_gate: true
     severity_preset: page_first
     aggregation: max
     labels:

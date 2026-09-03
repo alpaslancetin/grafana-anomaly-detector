@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import datetime
 from statistics import median
 
@@ -212,6 +213,7 @@ def _empty_snapshot(rule: RuleConfig, source_metric: str, labels: dict[str, str]
         algorithm=rule.algorithm,
         severity_preset=rule.severity_preset,
         timestamp=timestamp,
+        decision_state='warming_up',
     )
 
 def _snapshot(
@@ -263,6 +265,7 @@ def _snapshot(
         algorithm=rule.algorithm,
         severity_preset=rule.severity_preset,
         timestamp=timestamp,
+        decision_state='open' if severity.is_anomaly else 'normal',
     )
 
 
@@ -335,7 +338,73 @@ def _snapshot_level_shift(
         algorithm=rule.algorithm,
         severity_preset=rule.severity_preset,
         timestamp=timestamp,
+        decision_state='open' if severity.is_anomaly else 'normal',
     )
+
+
+def _decision_candidate(rule: RuleConfig, snapshot: SeriesSnapshot, threshold: float | None = None) -> bool:
+    if snapshot.expected is None:
+        return False
+    deviation = snapshot.value - snapshot.expected
+    direction_matches = (
+        rule.anomaly_direction == 'high_or_low'
+        or (rule.anomaly_direction == 'high_mean' and deviation > 0)
+        or (rule.anomaly_direction == 'low_mean' and deviation < 0)
+    )
+    absolute_deviation = abs(deviation)
+    relative_deviation = absolute_deviation / max(abs(snapshot.expected), 1e-9)
+    quality_matches = not rule.data_quality_gate or snapshot.data_quality_label == 'healthy'
+    return bool(
+        snapshot.raw_score >= (rule.threshold if threshold is None else threshold)
+        and direction_matches
+        and absolute_deviation >= max(0.0, rule.minimum_absolute_deviation)
+        and relative_deviation >= max(0.0, rule.minimum_relative_deviation)
+        and max(abs(snapshot.value), abs(snapshot.expected)) >= max(0.0, rule.minimum_activity)
+        and quality_matches
+    )
+
+
+def _apply_decision_policy(rule: RuleConfig, state: SeriesState, snapshot: SeriesSnapshot) -> SeriesSnapshot:
+    if (
+        rule.anomaly_direction == 'high_or_low'
+        and rule.minimum_absolute_deviation <= 0
+        and rule.minimum_relative_deviation <= 0
+        and rule.minimum_activity <= 0
+        and rule.persistence_buckets <= 1
+        and rule.recovery_threshold <= 0
+        and rule.recovery_buckets <= 1
+        and rule.cooldown_buckets <= 0
+        and not rule.data_quality_gate
+    ):
+        return snapshot
+    open_candidate = _decision_candidate(rule, snapshot)
+    close_threshold = rule.recovery_threshold if rule.recovery_threshold > 0 else rule.threshold
+    hold_candidate = _decision_candidate(rule, snapshot, close_threshold)
+    state.decision_history.append(open_candidate)
+    window = max(1, rule.persistence_window)
+    required = max(1, min(window, rule.persistence_buckets))
+    recent = list(state.decision_history)[-window:]
+    if state.incident_open:
+        if hold_candidate:
+            state.recovery_count = 0
+            return replace(snapshot, is_anomaly=True, decision_state='open')
+        state.recovery_count += 1
+        if state.recovery_count < max(1, rule.recovery_buckets):
+            return replace(snapshot, is_anomaly=True, decision_state='recovering')
+        state.incident_open = False
+        state.recovery_count = 0
+        state.cooldown_remaining = max(0, rule.cooldown_buckets)
+
+    if state.cooldown_remaining > 0:
+        state.cooldown_remaining -= 1
+        return replace(snapshot, normalized_score=0.0, severity_label='normal', is_anomaly=False, decision_state='cooldown')
+
+    if open_candidate and sum(recent) >= required:
+        state.incident_open = True
+        return replace(snapshot, is_anomaly=True, decision_state='open')
+
+    decision_state = 'candidate' if open_candidate else ('warming_up' if snapshot.expected is None else 'normal')
+    return replace(snapshot, normalized_score=0.0, severity_label='normal', is_anomaly=False, decision_state=decision_state)
 
 
 def evaluate_series(state: SeriesState, rule: RuleConfig, source_metric: str, labels: dict[str, str], value: float, timestamp: float) -> SeriesSnapshot:
@@ -424,6 +493,7 @@ def evaluate_series(state: SeriesState, rule: RuleConfig, source_metric: str, la
         state.seasonal_history[bucket_keys['hour_of_day']].append(value)
         state.seasonal_history[bucket_keys['weekday_hour']].append(value)
 
+    result = _apply_decision_policy(rule, state, result)
     state.history.append(SampleHistoryEntry(timestamp=timestamp, value=value))
     if rule.algorithm != 'ewma' and state.ewma_baseline is None:
         state.ewma_baseline = value

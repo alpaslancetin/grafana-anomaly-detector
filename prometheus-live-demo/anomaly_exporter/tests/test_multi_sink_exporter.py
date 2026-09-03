@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -338,6 +339,23 @@ rules:
             with self.assertRaises(RegistrationError):
                 registry.upsert_panel_registration(payload)
 
+    def test_runtime_rejects_unlisted_dynamic_datasource_hosts(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            runtime = ExporterRuntime(str(Path(tempdir) / 'config.yml'), str(Path(tempdir) / 'dynamic.json'))
+            runtime.current_config = AppConfig(
+                global_config=GlobalConfig(allowed_datasource_hosts=['prometheus.internal']),
+                rules=[],
+                sinks={},
+            )
+            allowed = {'targets': [{'datasourceUrl': 'http://prometheus.internal:9090'}]}
+            runtime._validate_registration_datasource_urls(allowed)
+            with self.assertRaises(RegistrationError):
+                runtime._validate_registration_datasource_urls(
+                    {'targets': [{'datasourceUrl': 'http://169.254.169.254/latest/meta-data'}]}
+                )
+            with self.assertRaises(RegistrationError):
+                runtime._validate_registration_datasource_urls({'targets': [{'datasourceUrl': 'file:///etc/passwd'}]})
+
     def test_canonical_scorer_suppresses_range_boundary_false_positives(self) -> None:
         values = [100, 100.2, 99.8, 106, 100.1, 99.9, 100.3, 99.7, 100.2, 99.8, 100.1, 99.9, 130]
         points = [RawPoint(index, value, index, index, 1, value, value) for index, value in enumerate(values)]
@@ -357,6 +375,102 @@ rules:
                 self.assertTrue(all(not snapshot.is_anomaly for snapshot in snapshots[:12]))
                 self.assertTrue(all(snapshot.expected is None for snapshot in snapshots[:12]))
                 self.assertTrue(snapshots[12].is_anomaly)
+
+    def test_direction_policy_matches_batch_and_streaming_scorers(self) -> None:
+        for direction, final_value, expected_anomaly in (
+            ('high_mean', 160.0, True),
+            ('high_mean', 40.0, False),
+            ('low_mean', 160.0, False),
+            ('low_mean', 40.0, True),
+            ('high_or_low', 160.0, True),
+            ('high_or_low', 40.0, True),
+        ):
+            with self.subTest(direction=direction, final_value=final_value):
+                rule = RuleConfig(
+                    name='direction',
+                    query='demo',
+                    algorithm='zscore',
+                    anomaly_direction=direction,
+                    threshold=4.0,
+                    baseline_window=12,
+                )
+                values = ([100.0] * 12) + [final_value]
+                points = [RawPoint(index, value, index, index, 1, value, value) for index, value in enumerate(values)]
+                batch_result = score_points(rule, 'demo', {}, points)[-1]
+                state = SeriesState.create(history_limit=rule.history_limit, seasonal_window=rule.baseline_window)
+                streaming_result = [
+                    evaluate_series(state, rule, 'demo', {}, value, float(index))
+                    for index, value in enumerate(values)
+                ][-1]
+
+                self.assertEqual(batch_result.is_anomaly, expected_anomaly)
+                self.assertEqual(streaming_result.is_anomaly, expected_anomaly)
+                self.assertEqual(batch_result.normalized_score, streaming_result.normalized_score)
+                if not expected_anomaly:
+                    self.assertEqual(batch_result.normalized_score, 0)
+                    self.assertEqual(streaming_result.severity_label, 'normal')
+
+    def test_decision_policy_enforces_persistence_and_absolute_floor(self) -> None:
+        rule = RuleConfig(
+            name='persistent_high',
+            query='demo',
+            algorithm='mad',
+            anomaly_direction='high_mean',
+            threshold=4.0,
+            baseline_window=12,
+            persistence_buckets=3,
+            persistence_window=4,
+        )
+        values = ([100.0] * 12) + ([160.0] * 4)
+        points = [RawPoint(index, value, index, index, 1, value, value) for index, value in enumerate(values)]
+        batch = score_points(rule, 'demo', {}, points)
+        self.assertTrue(all(not snapshot.is_anomaly for snapshot in batch[12:14]))
+        self.assertTrue(batch[14].is_anomaly)
+
+        state = SeriesState.create(history_limit=rule.history_limit, seasonal_window=rule.baseline_window)
+        streaming = [evaluate_series(state, rule, 'demo', {}, value, float(index)) for index, value in enumerate(values)]
+        self.assertEqual([item.is_anomaly for item in batch], [item.is_anomaly for item in streaming])
+
+        floor_rule = RuleConfig(
+            name='floor',
+            query='demo',
+            algorithm='mad',
+            threshold=4.0,
+            baseline_window=12,
+            minimum_absolute_deviation=10.0,
+        )
+        # The raw score breaches 4.0, but the absolute deviation remains below 10.
+        floor_values = ([100.0] * 12) + [109.0]
+        floor_points = [RawPoint(index, value, index, index, 1, value, value) for index, value in enumerate(floor_values)]
+        blocked = score_points(floor_rule, 'demo', {}, floor_points)[-1]
+        self.assertFalse(blocked.is_anomaly)
+        self.assertGreaterEqual(blocked.raw_score, floor_rule.threshold)
+        self.assertEqual(blocked.normalized_score, 0)
+
+    def test_decision_lifecycle_matches_batch_and_streaming_scorers(self) -> None:
+        rule = RuleConfig(
+            name='decision_lifecycle',
+            query='demo',
+            algorithm='mad',
+            anomaly_direction='high_mean',
+            threshold=4.0,
+            baseline_window=12,
+            persistence_buckets=2,
+            persistence_window=3,
+            recovery_threshold=2.0,
+            recovery_buckets=2,
+            cooldown_buckets=2,
+        )
+        values = ([99.0, 101.0] * 6) + [108.0, 108.0, 108.0, 103.0, 100.0, 100.0, 108.0, 108.0, 108.0]
+        points = [RawPoint(index, value, index, index, 1, value, value) for index, value in enumerate(values)]
+        batch = score_points(rule, 'demo', {}, points)
+        state = SeriesState.create(history_limit=rule.history_limit, seasonal_window=rule.baseline_window)
+        streaming = [evaluate_series(state, rule, 'demo', {}, value, float(index)) for index, value in enumerate(values)]
+
+        self.assertEqual([item.decision_state for item in batch], [item.decision_state for item in streaming])
+        self.assertIn('open', [item.decision_state for item in batch])
+        self.assertIn('recovering', [item.decision_state for item in batch])
+        self.assertIn('cooldown', [item.decision_state for item in batch])
 
     def test_streaming_scorer_uses_the_same_startup_warmup(self) -> None:
         values = [100, 100.2, 99.8, 106, 100.1, 99.9, 100.3, 99.7, 100.2, 99.8, 100.1, 99.9, 130]
@@ -441,7 +555,7 @@ rules:
         self.assertNotIn('confidence_label=', metrics)
         self.assertNotIn('data_quality=', metrics)
         self.assertNotIn('score_driver=', metrics)
-        self.assertIn('grafana_anomaly_build_info{version="1.4.0"} 1', metrics)
+        self.assertIn('grafana_anomaly_build_info{version="1.5.0"} 1', metrics)
         self.assertIn('source_metric="Server api-1 - Login Rate"', metrics)
         self.assertIn('grafana_anomaly_sink_up{sink="loki"} 1', metrics)
         self.assertTrue(any(path == '/loki/api/v1/push' for path, _, _ in CaptureHandler.requests))
@@ -469,6 +583,43 @@ rules:
         self.assertNotIn('confidence_label', labels)
         self.assertNotIn('data_quality', labels)
         self.assertNotIn('score_driver', labels)
+
+        normalized = runtime._merge_labels(
+            {'service.name': 'api', '9zone': 'a'},
+            {
+                'service-name': 'edge',
+                'query': 'sum(rate(secretly_high_cardinality_query[5m]))',
+                'datasource_url': 'http://internal.example',
+            },
+        )
+        self.assertEqual(normalized['service_name'], 'api')
+        self.assertEqual(normalized['_9zone'], 'a')
+        self.assertEqual(normalized['extra_service_name'], 'edge')
+        self.assertNotIn('query', normalized)
+        self.assertNotIn('datasource_url', normalized)
+
+    def test_influx_annotated_csv_uses_each_table_header_and_drops_state_fields(self) -> None:
+        from app.sources.base import labels_from_row
+        from app.sources.influxdb import _iter_flux_rows
+
+        payload = '''#datatype,string,long,dateTime:RFC3339,double,string
+,result,table,_time,_value,rule
+,,0,2026-09-03T12:00:00Z,91.0,latency
+#datatype,string,long,dateTime:RFC3339,double,string,string,string
+,result,table,_time,_value,rule,decision_state,data_state
+,,1,2026-09-03T12:01:00Z,92.0,traffic,open,ok
+'''
+        rows = list(_iter_flux_rows(payload))
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1]['rule'], 'traffic')
+        self.assertNotIn(None, rows[1])
+        labels = labels_from_row({**rows[1], None: ['unexpected']}, 'fallback')
+        self.assertEqual(labels['__name__'], 'traffic')
+        self.assertNotIn('decision_state', labels)
+        self.assertNotIn('data_state', labels)
+        self.assertNotIn('None', labels)
+        self.assertNotIn('query', labels_from_row({'query': 'very long query', 'rule': 'traffic'}, 'fallback'))
 
     def test_runtime_accepts_plugin_computed_score_feed_for_selected_sink(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -702,9 +853,10 @@ rules: []
             )
             try:
                 runtime.rule_snapshots = [closed_rule]
+                pushed_at = time.time()
                 runtime.pushed_feeds = {
-                    'dash:1:panel_rule': ([], [pushed_rule], 1710000000),
-                    'dash:2:push_only_rule': ([], [other_pushed_rule], 1710000000),
+                    'dash:1:panel_rule': ([], [pushed_rule], pushed_at),
+                    'dash:2:push_only_rule': ([], [other_pushed_rule], pushed_at),
                 }
 
                 merged = runtime._merged_rule_snapshots_locked()
@@ -714,6 +866,25 @@ rules: []
         self.assertEqual([snapshot.name for snapshot in merged], ['panel_rule', 'push_only_rule'])
         self.assertEqual(merged[0].max_score, 0)
         self.assertEqual(merged[1].max_score, 96)
+
+    def test_rule_snapshot_distinguishes_no_data_error_warmup_and_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            config = Path(tempdir) / 'rules.yml'
+            config.write_text('rules: []\n', encoding='utf-8')
+            runtime = ExporterRuntime(str(config), str(Path(tempdir) / 'dynamic.json'))
+            rule = RuleConfig(name='stateful', query='up', step_seconds=10)
+            sample = sample_batch().series_snapshots[0]
+            try:
+                self.assertEqual(runtime._build_rule_snapshot(rule, [], 100).data_state, 'no_data')
+                self.assertEqual(runtime._build_rule_snapshot(rule, [], 100, 'query failed').data_state, 'error')
+                warming = replace(sample, expected=None, timestamp=95)
+                self.assertEqual(runtime._build_rule_snapshot(rule, [warming], 100).data_state, 'warming_up')
+                stale = replace(sample, timestamp=1)
+                stale_state = runtime._build_rule_snapshot(rule, [stale], 100)
+                self.assertEqual(stale_state.data_state, 'stale')
+                self.assertEqual(stale_state.last_data_timestamp, 1)
+            finally:
+                runtime.sink_manager.close()
 
     def test_registered_panel_feed_preview_does_not_write_duplicate_sink_records(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

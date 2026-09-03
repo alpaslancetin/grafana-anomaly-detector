@@ -26,9 +26,21 @@ const {
   getAlertQueryLanguage,
   buildSelectedAnnotationPayload,
   buildGrafanaErrorMessage,
+  fetchExporterJson,
+  stableScopeHash,
+  targetsMatchSavedScope,
+  detectAutoAnomalyDirection,
 } = __testables;
 
 describe('SimplePanel helpers', () => {
+  it('selects low-mean direction only for explicit decrease-sensitive metric semantics', () => {
+    expect(detectAutoAnomalyDirection(['service_availability_percent'])).toBe('low_mean');
+    expect(detectAutoAnomalyDirection(['login_success_rate'])).toBe('low_mean');
+    expect(detectAutoAnomalyDirection(['disk_space_free_bytes'])).toBe('low_mean');
+    expect(detectAutoAnomalyDirection(['http_request_duration_seconds'])).toBeNull();
+    expect(detectAutoAnomalyDirection(['backup_duration_seconds'])).toBeNull();
+  });
+
   it('uses Grafana datasource legend before display overrides and raw metric names', () => {
     expect(
       resolveSeriesDisplayName(
@@ -414,5 +426,61 @@ describe('SimplePanel helpers', () => {
     expect(buildGrafanaErrorMessage({ data: { message: 'Forbidden' }, status: 403 }, 'fallback')).toBe('Forbidden (HTTP 403)');
     expect(buildGrafanaErrorMessage(new Error('Boom'), 'fallback')).toBe('Boom');
     expect(buildGrafanaErrorMessage({}, 'fallback')).toBe('fallback');
+  });
+
+  it('reuses saved scope unless a runtime variable changes the query identity', () => {
+    const saved = [
+      {
+        refId: 'A',
+        expr: 'rate(http_requests_total{service="checkout"}[5m])',
+        legend: '{{instance}}',
+        datasourceUid: 'prom-main',
+        datasourceType: 'prometheus',
+      },
+    ];
+    expect(targetsMatchSavedScope(saved, [{ ...saved[0], datasourceUrl: 'http://prometheus:9090' }])).toBe(true);
+    expect(
+      targetsMatchSavedScope(saved, [
+        { ...saved[0], expr: 'rate(http_requests_total{service="payments"}[5m])' },
+      ])
+    ).toBe(false);
+  });
+
+  it('reports a metrics response as a base-path contract error', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'text/plain', 'X-Request-ID': 'req-1' }),
+      text: async () => 'grafana_anomaly_exporter_up 1',
+    }) as typeof fetch;
+    await expect(fetchExporterJson('https://example.test/anomalyalarm/api/capabilities')).rejects.toThrow(
+      'reached the Prometheus metrics endpoint'
+    );
+    global.fetch = originalFetch;
+  });
+
+  it('parses structured exporter errors and builds stable runtime scope identities', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      headers: new Headers({ 'Content-Type': 'application/json', 'X-Request-ID': 'req-2' }),
+      text: async () => JSON.stringify({ ok: false, error: { code: 'revision_conflict', message: 'Revision changed.' } }),
+    }) as typeof fetch;
+    await expect(fetchExporterJson('https://example.test/api/sync/panel')).rejects.toThrow('Revision changed.');
+    global.fetch = originalFetch;
+
+    const context = {
+      source: 'live',
+      dashboardUid: 'dashboard-a',
+      dashboardTitle: 'Dashboard A',
+      panelTitle: 'Panel A',
+      panelOptions: {},
+      targets: [{ refId: 'A', expr: 'up{job="api"}', legend: '', datasourceUid: 'prom', datasourceType: 'prometheus' }],
+    } as any;
+    expect(stableScopeHash(context)).toMatch(/^runtime-[a-f0-9]{8}$/);
+    expect(stableScopeHash(context)).toBe(stableScopeHash({ ...context, targets: [...context.targets] }));
+    expect(stableScopeHash({ ...context, source: 'saved' })).toBe('saved');
   });
 });

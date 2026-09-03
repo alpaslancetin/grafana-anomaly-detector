@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from ..models import PrometheusRangeSeries, PrometheusSample, RuleConfig
+from ..http_security import open_same_origin
 
 
 class SourceQueryError(RuntimeError):
@@ -25,7 +26,7 @@ class BaseSourceReader:
 def http_json(url: str, *, method: str = 'GET', body: bytes | None = None, headers: dict[str, str] | None = None, timeout_seconds: int = 10) -> Any:
     request = urllib.request.Request(url=url, method=method, data=body, headers=headers or {})
     try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        with open_same_origin(request, timeout_seconds) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as exc:  # noqa: BLE001
         raise SourceQueryError(f'HTTP source request failed for {url}: {exc}') from exc
@@ -95,14 +96,21 @@ LABEL_EXCLUDE_COLUMNS = {
     'window_raw_score',
     'confidence_score',
     'threshold',
+    'decision_state',
+    'data_state',
+    'is_anomaly',
+    'last_data_timestamp',
+    'query',
 }
 
 
 def labels_from_row(row: dict[str, Any], default_name: str) -> dict[str, str]:
     labels = {'__name__': str(row.get('__name__') or row.get('source_metric') or row.get('rule') or default_name)}
     for key, value in row.items():
-        key_text = str(key)
-        if key_text in LABEL_EXCLUDE_COLUMNS or value is None:
+        if not isinstance(key, str) or not key.strip() or value is None or isinstance(value, (list, dict, tuple, set)):
+            continue
+        key_text = key.strip()
+        if key_text in LABEL_EXCLUDE_COLUMNS:
             continue
         value_text = str(value)
         if value_text:

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.0
+
+- Added user-configurable Elastic-style `high_mean`, `low_mean`, and `high_or_low` anomaly direction policies with identical panel and exporter behavior.
+- Added minimum absolute/relative deviation, minimum activity, N-of-M persistence, and degraded-data decision gates.
+- Added root and configurable base-path API aliases, structured JSON errors, capabilities negotiation, bounded request bodies, CORS allowlists, optional bearer authentication, and datasource host allowlists.
+- Made dynamic rule registration thread-safe, idempotent, scope-aware, revision-aware, and crash-safe with atomic state writes and backup recovery.
+- Added dynamic state health and registration counters to the Prometheus exporter metrics.
+- Added interactive series isolate/hide controls, complete scrollable legends/tooltips, and responsive chart-only layout behavior.
+- Added recovery-threshold hysteresis, consecutive recovery buckets, cooldown, and explicit candidate/open/recovering lifecycle states with TypeScript/Python parity.
+- Added separate live, ready, and dependency health endpoints plus per-rule anomaly, decision-state, data-state, and last-sample metrics.
+- Added dynamic-rule quotas, runtime-scope TTL, feed-preview TTL, explicit panel deletion, request rate limiting, same-origin redirect enforcement, and valid Prometheus label normalization.
+- Fixed multi-table InfluxDB annotated CSV parsing so changing tag schemas cannot corrupt source labels or create cardinality noise.
+- Fixed narrow dashboard panels to reflow status metadata and KPI cards based on panel width rather than browser viewport width.
+
 ## 1.4.0
 
 - Preserved Grafana legends and aliases from datasource frames through panel views, exported score records, and dashboard-closed exporter recomputation.

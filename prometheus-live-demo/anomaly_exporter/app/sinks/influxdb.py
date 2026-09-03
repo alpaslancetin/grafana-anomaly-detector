@@ -53,6 +53,8 @@ class InfluxDBSink(AnomalySink):
             'algorithm': str(record.get('algorithm', 'unknown')),
             'source_metric': str(record.get('source_metric', 'unknown')),
             'record_type': str(record.get('record_type', 'series')),
+            'decision_state': str(record.get('decision_state', 'normal')),
+            'data_state': str(record.get('data_state', 'ok')),
         }
         fields = {
             'score': record.get('normalized_score'),
@@ -64,6 +66,7 @@ class InfluxDBSink(AnomalySink):
             'lower_bound': record.get('lower_bound'),
             'upper_bound': record.get('upper_bound'),
             'is_anomaly': 1 if record.get('is_anomaly') else 0,
+            'last_data_timestamp': record.get('last_data_timestamp'),
         }
         field_text = ','.join(f'{escape_key(key)}={format_field(value)}' for key, value in fields.items() if format_field(value) is not None)
         if not field_text:

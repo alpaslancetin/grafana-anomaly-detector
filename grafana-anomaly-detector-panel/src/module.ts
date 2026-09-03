@@ -5,6 +5,7 @@ import {
   ANOMALY_THRESHOLD_MIN,
   ANOMALY_THRESHOLD_STEP,
   BucketSpan,
+  AnomalyDirection,
   DetectionAlgorithm,
   DetectionMode,
   MarkerShapeMode,
@@ -43,6 +44,24 @@ const setupModes: Array<{ label: string; value: SetupMode; description: string }
 const detectionModes: Array<{ label: string; value: DetectionMode }> = [
   { label: 'Single metric', value: 'single' },
   { label: 'Multi metric', value: 'multi' },
+];
+
+const anomalyDirections: Array<{ label: string; value: AnomalyDirection; description: string }> = [
+  {
+    label: 'High mean',
+    value: 'high_mean',
+    description: 'Flag only sustained or unusual increases above the learned baseline.',
+  },
+  {
+    label: 'Low mean',
+    value: 'low_mean',
+    description: 'Flag only sustained or unusual decreases below the learned baseline.',
+  },
+  {
+    label: 'High or low',
+    value: 'high_or_low',
+    description: 'Flag meaningful deviations in either direction.',
+  },
 ];
 
 const scoreFeedModes: Array<{ label: string; value: ScoreFeedMode; description: string }> = [
@@ -375,6 +394,89 @@ export const plugin = new PanelPlugin<SimpleOptions>(SimplePanel).setPanelOption
       settings: {
         options: algorithms,
       },
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addSelect({
+      path: 'anomalyDirection',
+      name: 'Anomaly direction',
+      description: 'Elastic-style mean direction policy. Choose whether high, low, or both deviations may become anomalies.',
+      defaultValue: 'high_or_low',
+      settings: {
+        options: anomalyDirections,
+      },
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'minimumAbsoluteDeviation',
+      name: 'Minimum absolute deviation',
+      description: 'Ignore statistically unusual changes smaller than this metric-unit difference. Use 0 to disable the floor.',
+      defaultValue: 0,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'minimumRelativeDeviation',
+      name: 'Minimum relative deviation',
+      description: 'Minimum proportional change from the baseline; 0.10 means 10%. Use 0 to disable the floor.',
+      defaultValue: 0,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'minimumActivity',
+      name: 'Minimum activity',
+      description: 'Suppress anomaly decisions while both the current value and baseline are below this activity floor.',
+      defaultValue: 0,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'persistenceBuckets',
+      name: 'Required anomaly buckets',
+      description: 'Number of anomalous evaluations required inside the persistence window. Recommended: 3 of 4.',
+      defaultValue: 3,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'persistenceWindow',
+      name: 'Persistence window',
+      description: 'Evaluation bucket window used by the N-of-M anomaly decision. Must be at least the required bucket count.',
+      defaultValue: 4,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'recoveryThreshold',
+      name: 'Recovery threshold',
+      description: 'Keep an open incident active until its raw score falls below this lower threshold. Use 0 to close at the anomaly threshold.',
+      defaultValue: 3,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'recoveryBuckets',
+      name: 'Recovery buckets',
+      description: 'Consecutive recovered evaluations required before an open incident closes.',
+      defaultValue: 2,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addNumberInput({
+      path: 'cooldownBuckets',
+      name: 'Cooldown buckets',
+      description: 'Evaluations to suppress reopening after recovery. Use 0 to disable cooldown.',
+      defaultValue: 2,
+      category: advancedCategory,
+      showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
+    })
+    .addBooleanSwitch({
+      path: 'dataQualityGate',
+      name: 'Block degraded data',
+      description: 'Prevent thin, flatline, or irregular data from becoming an anomaly until data quality is healthy.',
+      defaultValue: true,
       category: advancedCategory,
       showIf: (config) => config.setupMode === 'advanced' || config.metricPreset === 'custom',
     })

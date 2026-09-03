@@ -58,6 +58,20 @@ def irregular_cadence_points() -> list[dict[str, float]]:
     return points
 
 
+def directional_shift_points(value: float) -> list[dict[str, float]]:
+    start = datetime(2026, 4, 10, 10, 0, tzinfo=timezone.utc).timestamp()
+    points = [{'timestamp': start + index * 60, 'value': 100.0} for index in range(180)]
+    for index in range(120, 126):
+        points[index]['value'] = value
+    return points
+
+
+def decision_lifecycle_points() -> list[dict[str, float]]:
+    start = datetime(2026, 4, 10, 10, 0, tzinfo=timezone.utc).timestamp()
+    values = ([99.0, 101.0] * 6) + [108.0, 108.0, 108.0, 103.0, 100.0, 100.0, 108.0, 108.0, 108.0]
+    return [{'timestamp': start + index * 60, 'value': value} for index, value in enumerate(values)]
+
+
 def build_cases() -> list[dict[str, Any]]:
     base_options = {
         'sensitivity': 3.0,
@@ -70,6 +84,51 @@ def build_cases() -> list[dict[str, Any]]:
         {'name': 'zscore_score10_at_1200', 'points': score10_points(), 'options': {**base_options, 'algorithm': 'zscore'}},
         {'name': 'mad_zero_baseline_spike', 'points': zero_baseline_spike_points(), 'options': {**base_options, 'algorithm': 'mad'}},
         {'name': 'zscore_irregular_cadence', 'points': irregular_cadence_points(), 'options': {**base_options, 'algorithm': 'zscore'}},
+        {
+            'name': 'mad_high_mean_persistent',
+            'points': directional_shift_points(160.0),
+            'options': {
+                **base_options,
+                'algorithm': 'mad',
+                'anomalyDirection': 'high_mean',
+                'persistenceBuckets': 3,
+                'persistenceWindow': 4,
+                'dataQualityGate': False,
+            },
+        },
+        {
+            'name': 'mad_low_mean_with_floors',
+            'points': directional_shift_points(40.0),
+            'options': {
+                **base_options,
+                'algorithm': 'mad',
+                'anomalyDirection': 'low_mean',
+                'minimumAbsoluteDeviation': 20.0,
+                'minimumRelativeDeviation': 0.2,
+                'persistenceBuckets': 2,
+                'persistenceWindow': 3,
+                'dataQualityGate': False,
+            },
+        },
+        {
+            'name': 'mad_low_mean_blocks_high_shift',
+            'points': directional_shift_points(160.0),
+            'options': {**base_options, 'algorithm': 'mad', 'anomalyDirection': 'low_mean'},
+        },
+        {
+            'name': 'mad_decision_lifecycle',
+            'points': decision_lifecycle_points(),
+            'options': {
+                **base_options,
+                'algorithm': 'mad',
+                'anomalyDirection': 'high_mean',
+                'persistenceBuckets': 2,
+                'persistenceWindow': 3,
+                'recoveryThreshold': 2.0,
+                'recoveryBuckets': 2,
+                'cooldownBuckets': 2,
+            },
+        },
     ]
     for algorithm in ['zscore', 'mad', 'ewma', 'seasonal', 'level_shift']:
         cases.append({'name': f'{algorithm}_deterministic', 'points': deterministic_points(), 'options': {**base_options, 'algorithm': algorithm}})
@@ -106,6 +165,16 @@ def run_py(cases: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
             name=item['name'],
             query='parity_fixture',
             algorithm=options['algorithm'],
+            anomaly_direction=str(options.get('anomalyDirection', 'high_or_low')),
+            minimum_absolute_deviation=float(options.get('minimumAbsoluteDeviation', 0.0)),
+            minimum_relative_deviation=float(options.get('minimumRelativeDeviation', 0.0)),
+            minimum_activity=float(options.get('minimumActivity', 0.0)),
+            persistence_buckets=int(options.get('persistenceBuckets', 1)),
+            persistence_window=int(options.get('persistenceWindow', 1)),
+            recovery_threshold=float(options.get('recoveryThreshold', 0.0)),
+            recovery_buckets=int(options.get('recoveryBuckets', 1)),
+            cooldown_buckets=int(options.get('cooldownBuckets', 0)),
+            data_quality_gate=bool(options.get('dataQualityGate', False)),
             threshold=float(options['sensitivity']),
             baseline_window=int(options['baselineWindow']),
             seasonality_samples=int(options['seasonalitySamples']),
@@ -135,6 +204,7 @@ def run_py(cases: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
                 'confidenceScore': snapshot.confidence_score,
                 'confidenceLabel': snapshot.confidence_label,
                 'dataQualityLabel': snapshot.data_quality_label,
+                'decisionState': snapshot.decision_state,
             }
             for snapshot in snapshots
         ]
@@ -174,6 +244,7 @@ def main() -> int:
         'confidenceLabel',
         'dataQualityLabel',
         'scoreDriver',
+        'decisionState',
     ]
 
     compared = 0

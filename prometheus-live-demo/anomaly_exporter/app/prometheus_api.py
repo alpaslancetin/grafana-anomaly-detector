@@ -4,6 +4,7 @@ import json
 import urllib.parse
 import urllib.request
 
+from .http_security import open_same_origin
 from .models import PrometheusRangeSeries, PrometheusSample
 
 
@@ -22,7 +23,7 @@ class PrometheusClient:
         request = urllib.request.Request(url=url, method='GET')
 
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with open_same_origin(request, self.timeout_seconds) as response:
                 payload = json.loads(response.read().decode('utf-8'))
         except Exception as exc:  # noqa: BLE001
             raise PrometheusQueryError(f'Query to Prometheus failed for {query!r}: {exc}') from exc
@@ -65,7 +66,7 @@ class PrometheusClient:
         request = urllib.request.Request(url=url, method='GET')
 
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with open_same_origin(request, self.timeout_seconds) as response:
                 payload = json.loads(response.read().decode('utf-8'))
         except Exception as exc:  # noqa: BLE001
             raise PrometheusQueryError(f'Range query to Prometheus failed for {query!r}: {exc}') from exc

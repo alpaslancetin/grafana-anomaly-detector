@@ -12,6 +12,7 @@ from .models import (
     SinkDefinition,
     SUPPORTED_AGGREGATIONS,
     SUPPORTED_ALGORITHMS,
+    SUPPORTED_ANOMALY_DIRECTIONS,
     SUPPORTED_SEASONAL_REFINEMENTS,
     SUPPORTED_SEVERITY_PRESETS,
 )
@@ -68,6 +69,18 @@ def _as_positive_float(value: object, field_name: str, default: float) -> float:
     return parsed
 
 
+def _as_non_negative_float(value: object, field_name: str, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f'{field_name} must be a number.') from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise ConfigError(f'{field_name} must be a finite zero or positive number.')
+    return parsed
+
+
 def _as_bool(value: object, field_name: str, default: bool = False) -> bool:
     if value is None:
         return default
@@ -79,6 +92,28 @@ def _as_bool(value: object, field_name: str, default: bool = False) -> bool:
     if lowered in {'0', 'false', 'no', 'n', 'off'}:
         return False
     raise ConfigError(f'{field_name} must be a boolean.')
+
+
+def _as_string_list(value: object, field_name: str) -> list[str]:
+    if value in (None, ''):
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(',') if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    raise ConfigError(f'{field_name} must be a list or comma-separated string.')
+
+
+def _normalize_base_path(value: object) -> str:
+    path = str(value or '').strip()
+    if not path or path == '/':
+        return ''
+    if '://' in path or '?' in path or '#' in path:
+        raise ConfigError('global.base_path must be a URL path such as /anomalyalarm.')
+    normalized = '/' + path.strip('/')
+    if '//' in normalized:
+        raise ConfigError('global.base_path must not contain empty path segments.')
+    return normalized
 
 
 def _parse_inline_map(value: str) -> dict[str, object]:
@@ -405,6 +440,48 @@ def load_config(path: str | Path) -> AppConfig:
             'global.config_reload_interval_seconds',
             global_defaults.config_reload_interval_seconds,
         ),
+        base_path=_normalize_base_path(_env_override('ANOMALY_BASE_PATH', global_raw.get('base_path', global_defaults.base_path))),
+        cors_allowed_origins=_as_string_list(
+            _env_override('ANOMALY_CORS_ALLOWED_ORIGINS', global_raw.get('cors_allowed_origins')),
+            'global.cors_allowed_origins',
+        ),
+        api_token_env=str(_env_override('ANOMALY_API_TOKEN_ENV', global_raw.get('api_token_env', global_defaults.api_token_env))).strip(),
+        max_request_body_bytes=_as_positive_int(
+            _env_override('ANOMALY_MAX_REQUEST_BODY_BYTES', global_raw.get('max_request_body_bytes')),
+            'global.max_request_body_bytes',
+            global_defaults.max_request_body_bytes,
+        ),
+        allowed_datasource_hosts=_as_string_list(
+            _env_override('ANOMALY_ALLOWED_DATASOURCE_HOSTS', global_raw.get('allowed_datasource_hosts')),
+            'global.allowed_datasource_hosts',
+        ),
+        max_dynamic_rules=_as_positive_int(
+            global_raw.get('max_dynamic_rules'), 'global.max_dynamic_rules', global_defaults.max_dynamic_rules
+        ),
+        max_rules_per_panel=_as_positive_int(
+            global_raw.get('max_rules_per_panel'), 'global.max_rules_per_panel', global_defaults.max_rules_per_panel
+        ),
+        max_query_length=_as_positive_int(
+            global_raw.get('max_query_length'), 'global.max_query_length', global_defaults.max_query_length
+        ),
+        max_feed_series=_as_positive_int(
+            global_raw.get('max_feed_series'), 'global.max_feed_series', global_defaults.max_feed_series
+        ),
+        runtime_scope_ttl_seconds=_as_non_negative_int(
+            global_raw.get('runtime_scope_ttl_seconds'),
+            'global.runtime_scope_ttl_seconds',
+            global_defaults.runtime_scope_ttl_seconds,
+        ),
+        pushed_feed_ttl_seconds=_as_non_negative_int(
+            global_raw.get('pushed_feed_ttl_seconds'),
+            'global.pushed_feed_ttl_seconds',
+            global_defaults.pushed_feed_ttl_seconds,
+        ),
+        api_rate_limit_per_minute=_as_positive_int(
+            global_raw.get('api_rate_limit_per_minute'),
+            'global.api_rate_limit_per_minute',
+            global_defaults.api_rate_limit_per_minute,
+        ),
     )
 
     rules: list[RuleConfig] = []
@@ -428,6 +505,12 @@ def load_config(path: str | Path) -> AppConfig:
         if algorithm not in SUPPORTED_ALGORITHMS:
             raise ConfigError(f'rules[{index}].algorithm must be one of: {sorted(SUPPORTED_ALGORITHMS)}')
 
+        anomaly_direction = str(entry.get('anomaly_direction', 'high_or_low')).strip().lower()
+        if anomaly_direction not in SUPPORTED_ANOMALY_DIRECTIONS:
+            raise ConfigError(
+                f'rules[{index}].anomaly_direction must be one of: {sorted(SUPPORTED_ANOMALY_DIRECTIONS)}'
+            )
+
         seasonal_refinement = str(entry.get('seasonal_refinement', 'cycle')).strip().lower()
         if seasonal_refinement not in SUPPORTED_SEASONAL_REFINEMENTS:
             raise ConfigError(
@@ -446,6 +529,13 @@ def load_config(path: str | Path) -> AppConfig:
         if not isinstance(labels, dict):
             raise ConfigError(f'rules[{index}].labels must be a mapping.')
 
+        threshold = _as_positive_float(entry.get('threshold'), f'rules[{index}].threshold', 4.0)
+        recovery_threshold = _as_non_negative_float(
+            entry.get('recovery_threshold'), f'rules[{index}].recovery_threshold', 0.0
+        )
+        if recovery_threshold > threshold:
+            raise ConfigError(f'rules[{index}].recovery_threshold must not exceed threshold.')
+
         rules.append(
             RuleConfig(
                 name=name,
@@ -457,7 +547,31 @@ def load_config(path: str | Path) -> AppConfig:
                 step_seconds=_as_non_negative_int(entry.get('step_seconds'), f'rules[{index}].step_seconds', 0),
                 bucket_span_seconds=_as_non_negative_int(entry.get('bucket_span_seconds'), f'rules[{index}].bucket_span_seconds', 0),
                 algorithm=algorithm,
-                threshold=_as_positive_float(entry.get('threshold'), f'rules[{index}].threshold', 4.0),
+                anomaly_direction=anomaly_direction,
+                minimum_absolute_deviation=_as_non_negative_float(
+                    entry.get('minimum_absolute_deviation'), f'rules[{index}].minimum_absolute_deviation', 0.0
+                ),
+                minimum_relative_deviation=_as_non_negative_float(
+                    entry.get('minimum_relative_deviation'), f'rules[{index}].minimum_relative_deviation', 0.0
+                ),
+                minimum_activity=_as_non_negative_float(
+                    entry.get('minimum_activity'), f'rules[{index}].minimum_activity', 0.0
+                ),
+                persistence_buckets=_as_positive_int(
+                    entry.get('persistence_buckets'), f'rules[{index}].persistence_buckets', 1
+                ),
+                persistence_window=_as_positive_int(
+                    entry.get('persistence_window'), f'rules[{index}].persistence_window', 1
+                ),
+                recovery_threshold=recovery_threshold,
+                recovery_buckets=_as_positive_int(
+                    entry.get('recovery_buckets'), f'rules[{index}].recovery_buckets', 1
+                ),
+                cooldown_buckets=_as_non_negative_int(
+                    entry.get('cooldown_buckets'), f'rules[{index}].cooldown_buckets', 0
+                ),
+                data_quality_gate=_as_bool(entry.get('data_quality_gate'), f'rules[{index}].data_quality_gate', False),
+                threshold=threshold,
                 baseline_window=_as_positive_int(entry.get('baseline_window'), f'rules[{index}].baseline_window', 12),
                 seasonality_samples=_as_positive_int(entry.get('seasonality_samples'), f'rules[{index}].seasonality_samples', 24),
                 seasonal_refinement=seasonal_refinement,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from statistics import median
 
@@ -257,6 +257,12 @@ def _data_quality_state_from_arrays(values: list[float], times: list[float], ind
     return 'healthy'
 
 
+def _data_quality_states(points: list[RawPoint], baseline_window: int) -> list[str]:
+    values = [point.value for point in points]
+    times = [point.time for point in points]
+    return [_data_quality_state_from_arrays(values, times, index, baseline_window) for index in range(len(points))]
+
+
 def _confidence_state(
     raw_score: float,
     threshold: float,
@@ -315,6 +321,7 @@ def _empty_snapshot(rule: RuleConfig, source_metric: str, labels: dict[str, str]
         algorithm=rule.algorithm,
         severity_preset=rule.severity_preset,
         timestamp=point.time,
+        decision_state='warming_up',
     )
 
 
@@ -328,12 +335,14 @@ def _snapshot(
     expected: float,
     spread: float,
     *,
+    data_quality_label: str | None = None,
     include_window_score: bool = False,
     level_shift_score_driver: bool = False,
     level_shift_point_multiplier: float = 1.0,
 ) -> SeriesSnapshot:
     point = points[index]
-    data_quality_label = _data_quality_state(points, index, rule.baseline_window)
+    if data_quality_label is None:
+        data_quality_label = _data_quality_state(points, index, rule.baseline_window)
     point_raw_score = abs(point.value - expected) / spread
     window_raw_score = _window_score(history, point.value, expected, spread, rule.baseline_window) if include_window_score else 0.0
     raw_score = max(point_raw_score * level_shift_point_multiplier, window_raw_score)
@@ -374,7 +383,89 @@ def _snapshot(
         algorithm=rule.algorithm,
         severity_preset=rule.severity_preset,
         timestamp=point.time,
+        decision_state='open' if is_anomaly else 'normal',
     )
+
+
+def _decision_candidate(rule: RuleConfig, snapshot: SeriesSnapshot, threshold: float | None = None) -> bool:
+    if snapshot.expected is None:
+        return False
+    deviation = snapshot.value - snapshot.expected
+    direction_matches = (
+        rule.anomaly_direction == 'high_or_low'
+        or (rule.anomaly_direction == 'high_mean' and deviation > 0)
+        or (rule.anomaly_direction == 'low_mean' and deviation < 0)
+    )
+    absolute_deviation = abs(deviation)
+    relative_deviation = absolute_deviation / max(abs(snapshot.expected), 1e-9)
+    quality_matches = not rule.data_quality_gate or snapshot.data_quality_label == 'healthy'
+    return bool(
+        snapshot.raw_score >= (rule.threshold if threshold is None else threshold)
+        and direction_matches
+        and absolute_deviation >= max(0.0, rule.minimum_absolute_deviation)
+        and relative_deviation >= max(0.0, rule.minimum_relative_deviation)
+        and max(abs(snapshot.value), abs(snapshot.expected)) >= max(0.0, rule.minimum_activity)
+        and quality_matches
+    )
+
+
+def _apply_decision_policy(rule: RuleConfig, snapshots: list[SeriesSnapshot]) -> list[SeriesSnapshot]:
+    if (
+        rule.anomaly_direction == 'high_or_low'
+        and rule.minimum_absolute_deviation <= 0
+        and rule.minimum_relative_deviation <= 0
+        and rule.minimum_activity <= 0
+        and rule.persistence_buckets <= 1
+        and rule.recovery_threshold <= 0
+        and rule.recovery_buckets <= 1
+        and rule.cooldown_buckets <= 0
+        and not rule.data_quality_gate
+    ):
+        return snapshots
+    window = max(1, rule.persistence_window)
+    required = max(1, min(window, rule.persistence_buckets))
+    open_candidates = [_decision_candidate(rule, snapshot) for snapshot in snapshots]
+    close_threshold = rule.recovery_threshold if rule.recovery_threshold > 0 else rule.threshold
+    hold_candidates = [_decision_candidate(rule, snapshot, close_threshold) for snapshot in snapshots]
+    resolved: list[SeriesSnapshot] = []
+    recent: list[bool] = []
+    incident_open = False
+    recovery_count = 0
+    cooldown_remaining = 0
+    for index, snapshot in enumerate(snapshots):
+        open_candidate = open_candidates[index]
+        hold_candidate = hold_candidates[index]
+        recent.append(open_candidate)
+        recent = recent[-window:]
+
+        if incident_open:
+            if hold_candidate:
+                recovery_count = 0
+                resolved.append(replace(snapshot, is_anomaly=True, decision_state='open'))
+                continue
+            recovery_count += 1
+            if recovery_count < max(1, rule.recovery_buckets):
+                resolved.append(replace(snapshot, is_anomaly=True, decision_state='recovering'))
+                continue
+            incident_open = False
+            recovery_count = 0
+            cooldown_remaining = max(0, rule.cooldown_buckets)
+
+        if cooldown_remaining > 0:
+            cooldown_remaining -= 1
+            resolved.append(replace(snapshot, normalized_score=0.0, severity_label='normal', is_anomaly=False, decision_state='cooldown'))
+            continue
+
+        if open_candidate and sum(recent) >= required:
+            incident_open = True
+            resolved.append(replace(snapshot, is_anomaly=True, decision_state='open'))
+            continue
+
+        state = 'candidate' if open_candidate else ('warming_up' if snapshot.expected is None else 'normal')
+        # Alert queries consume normalized_score, so a blocked decision must
+        # not retain a firing score; raw magnitude remains for diagnosis.
+        resolved.append(replace(snapshot, normalized_score=0.0, severity_label='normal', is_anomaly=False, decision_state=state))
+    return resolved
 
 
 def score_points(rule: RuleConfig, source_metric: str, labels: dict[str, str], raw_points: list[RawPoint]) -> list[SeriesSnapshot]:
@@ -386,7 +477,23 @@ def score_points(rule: RuleConfig, source_metric: str, labels: dict[str, str], r
     canonical_rule = RuleConfig(
         name=rule.name,
         query=rule.query,
+        source_type=rule.source_type,
+        datasource_url=rule.datasource_url,
+        target_sinks=rule.target_sinks,
+        range_seconds=rule.range_seconds,
+        step_seconds=rule.step_seconds,
+        bucket_span_seconds=rule.bucket_span_seconds,
         algorithm=rule.algorithm,
+        anomaly_direction=rule.anomaly_direction,
+        minimum_absolute_deviation=rule.minimum_absolute_deviation,
+        minimum_relative_deviation=rule.minimum_relative_deviation,
+        minimum_activity=rule.minimum_activity,
+        persistence_buckets=rule.persistence_buckets,
+        persistence_window=rule.persistence_window,
+        recovery_threshold=rule.recovery_threshold,
+        recovery_buckets=rule.recovery_buckets,
+        cooldown_buckets=rule.cooldown_buckets,
+        data_quality_gate=rule.data_quality_gate,
         threshold=threshold,
         baseline_window=window,
         seasonality_samples=max(rule.seasonality_samples, 2),
@@ -398,39 +505,70 @@ def score_points(rule: RuleConfig, source_metric: str, labels: dict[str, str], r
         description=rule.description,
     )
 
+    quality_states = _data_quality_states(points, window)
+
     if canonical_rule.algorithm == 'ewma':
-        return _score_ewma(canonical_rule, source_metric, labels, points)
-    if canonical_rule.algorithm == 'seasonal':
-        return _score_seasonal(canonical_rule, source_metric, labels, points)
-    if canonical_rule.algorithm == 'level_shift':
-        return _score_level_shift(canonical_rule, source_metric, labels, points)
+        snapshots = _score_ewma(canonical_rule, source_metric, labels, points, quality_states)
+    elif canonical_rule.algorithm == 'seasonal':
+        snapshots = _score_seasonal(canonical_rule, source_metric, labels, points, quality_states)
+    elif canonical_rule.algorithm == 'level_shift':
+        snapshots = _score_level_shift(canonical_rule, source_metric, labels, points, quality_states)
+    else:
+        snapshots = []
+        for index, point in enumerate(points):
+            history_points = points[max(0, index - window) : index]
+            history = [entry.value for entry in history_points]
 
-    snapshots: list[SeriesSnapshot] = []
-    for index, point in enumerate(points):
-        history_points = points[max(0, index - window) : index]
-        history = [entry.value for entry in history_points]
+            if canonical_rule.algorithm == 'zscore':
+                if len(history) < warmup_history_points(window):
+                    snapshots.append(_empty_snapshot(canonical_rule, source_metric, labels, point))
+                    continue
+                expected = _mean(history)
+                spread = _safe_spread(_stddev(history, expected), expected)
+                snapshots.append(
+                    _snapshot(
+                        canonical_rule,
+                        source_metric,
+                        labels,
+                        points,
+                        index,
+                        history,
+                        expected,
+                        spread,
+                        data_quality_label=quality_states[index],
+                    )
+                )
+            else:
+                if len(history) < warmup_history_points(window):
+                    snapshots.append(_empty_snapshot(canonical_rule, source_metric, labels, point))
+                    continue
+                expected = median(history)
+                spread = _safe_spread(median([abs(value - expected) for value in history]) * 1.4826, expected)
+                snapshots.append(
+                    _snapshot(
+                        canonical_rule,
+                        source_metric,
+                        labels,
+                        points,
+                        index,
+                        history,
+                        expected,
+                        spread,
+                        data_quality_label=quality_states[index],
+                    )
+                )
 
-        if canonical_rule.algorithm == 'zscore':
-            if len(history) < warmup_history_points(window):
-                snapshots.append(_empty_snapshot(canonical_rule, source_metric, labels, point))
-                continue
-            expected = _mean(history)
-            spread = _safe_spread(_stddev(history, expected), expected)
-            snapshots.append(_snapshot(canonical_rule, source_metric, labels, points, index, history, expected, spread))
-        else:
-            if len(history) < warmup_history_points(window):
-                snapshots.append(_empty_snapshot(canonical_rule, source_metric, labels, point))
-                continue
-            expected = median(history)
-            spread = _safe_spread(median([abs(value - expected) for value in history]) * 1.4826, expected)
-            snapshots.append(_snapshot(canonical_rule, source_metric, labels, points, index, history, expected, spread))
-
-    return snapshots
+    return _apply_decision_policy(canonical_rule, snapshots)
 
 
-def _score_level_shift(rule: RuleConfig, source_metric: str, labels: dict[str, str], points: list[RawPoint]) -> list[SeriesSnapshot]:
+def _score_level_shift(
+    rule: RuleConfig,
+    source_metric: str,
+    labels: dict[str, str],
+    points: list[RawPoint],
+    quality_states: list[str],
+) -> list[SeriesSnapshot]:
     values = [point.value for point in points]
-    times = [point.time for point in points]
     shift_window = min(max(3, rule.baseline_window // 3), 12)
     recent_window = max(1, shift_window - 1)
     lookback_window = max(rule.baseline_window * 6, rule.baseline_window + shift_window)
@@ -465,7 +603,7 @@ def _score_level_shift(rule: RuleConfig, source_metric: str, labels: dict[str, s
         window_raw_score = (abs(recent_center - expected) / spread) * (1 + max(0.0, persistence_ratio - 0.4))
         raw_score = max(point_raw_score * 0.85, window_raw_score)
         normalized_score, severity_label, is_anomaly = _severity_state(raw_score, rule.threshold, rule.severity_preset)
-        data_quality_label = _data_quality_state_from_arrays(values, times, index, rule.baseline_window)
+        data_quality_label = quality_states[index]
         confidence_score, confidence_label = _confidence_state(
             raw_score,
             rule.threshold,
@@ -498,13 +636,20 @@ def _score_level_shift(rule: RuleConfig, source_metric: str, labels: dict[str, s
                 algorithm=rule.algorithm,
                 severity_preset=rule.severity_preset,
                 timestamp=point.time,
+                decision_state='open' if is_anomaly else 'normal',
             )
         )
 
     return snapshots
 
 
-def _score_ewma(rule: RuleConfig, source_metric: str, labels: dict[str, str], points: list[RawPoint]) -> list[SeriesSnapshot]:
+def _score_ewma(
+    rule: RuleConfig,
+    source_metric: str,
+    labels: dict[str, str],
+    points: list[RawPoint],
+    quality_states: list[str],
+) -> list[SeriesSnapshot]:
     snapshots: list[SeriesSnapshot] = []
     alpha = 2 / (max(rule.baseline_window, 2) + 1)
     smoothed: float | None = None
@@ -526,12 +671,31 @@ def _score_ewma(rule: RuleConfig, source_metric: str, labels: dict[str, str], po
         if len(recent_values) < warmup_history_points(rule.baseline_window):
             snapshots.append(_empty_snapshot(rule, source_metric, labels, point))
             continue
-        snapshots.append(_snapshot(rule, source_metric, labels, points, index, recent_values, expected, spread, include_window_score=True))
+        snapshots.append(
+            _snapshot(
+                rule,
+                source_metric,
+                labels,
+                points,
+                index,
+                recent_values,
+                expected,
+                spread,
+                data_quality_label=quality_states[index],
+                include_window_score=True,
+            )
+        )
 
     return snapshots
 
 
-def _score_seasonal(rule: RuleConfig, source_metric: str, labels: dict[str, str], points: list[RawPoint]) -> list[SeriesSnapshot]:
+def _score_seasonal(
+    rule: RuleConfig,
+    source_metric: str,
+    labels: dict[str, str],
+    points: list[RawPoint],
+    quality_states: list[str],
+) -> list[SeriesSnapshot]:
     snapshots: list[SeriesSnapshot] = []
     hourly_history: dict[str, list[float]] = {}
     weekday_history: dict[str, list[float]] = {}
@@ -562,6 +726,18 @@ def _score_seasonal(rule: RuleConfig, source_metric: str, labels: dict[str, str]
 
         recent_history = [entry.value for entry in points[max(0, index - rule.baseline_window) : index]]
         expected, spread = _seasonal_expected_and_spread(peers, recent_history)
-        snapshots.append(_snapshot(rule, source_metric, labels, points, index, recent_history, expected, spread))
+        snapshots.append(
+            _snapshot(
+                rule,
+                source_metric,
+                labels,
+                points,
+                index,
+                recent_history,
+                expected,
+                spread,
+                data_quality_label=quality_states[index],
+            )
+        )
 
     return snapshots

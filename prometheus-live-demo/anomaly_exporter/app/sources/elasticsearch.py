@@ -6,6 +6,7 @@ import os
 import urllib.request
 
 from ..models import PrometheusRangeSeries
+from ..http_security import open_same_origin
 from .base import BaseSourceReader, SourceQueryError, grouped_series, labels_from_row, sample_from_row
 
 
@@ -44,7 +45,7 @@ class ElasticsearchSourceReader(BaseSourceReader):
             headers['Authorization'] = 'Basic ' + base64.b64encode(f'{user}:{password}'.encode('utf-8')).decode('ascii')
         request = urllib.request.Request(url=search_url, method='POST', data=body.encode('utf-8'), headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with open_same_origin(request, self.timeout_seconds) as response:
                 payload = json.loads(response.read().decode('utf-8'))
         except Exception as exc:  # noqa: BLE001
             raise SourceQueryError(f'Elasticsearch query failed for rule {self.rule.name!r}: {exc}') from exc

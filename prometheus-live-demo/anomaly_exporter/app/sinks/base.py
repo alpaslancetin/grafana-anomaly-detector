@@ -211,6 +211,7 @@ def series_snapshot_record(snapshot: SeriesSnapshot) -> dict[str, Any]:
         'confidence_label': snapshot.confidence_label,
         'data_quality_label': snapshot.data_quality_label,
         'score_driver': snapshot.score_driver,
+        'decision_state': snapshot.decision_state,
     }
 
 
@@ -240,6 +241,9 @@ def rule_snapshot_record(snapshot: RuleSnapshot) -> dict[str, Any]:
         'breach_count': snapshot.breach_count,
         'active_series': snapshot.active_series,
         'query': snapshot.query,
+        'decision_state': 'open' if (snapshot.active_incidents or snapshot.breach_count) > 0 else 'normal',
+        'data_state': snapshot.data_state,
+        'last_data_timestamp': snapshot.last_data_timestamp,
     }
 
 

@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 
 from ..models import PrometheusRangeSeries
+from ..http_security import open_same_origin
 from .base import BaseSourceReader, SourceQueryError, grouped_series, labels_from_row, sample_from_row
 
 
@@ -27,7 +28,7 @@ class ClickHouseSourceReader(BaseSourceReader):
         url = f'{self.rule.datasource_url.rstrip("/")}/?{urllib.parse.urlencode(params)}'
         request = urllib.request.Request(url=url, method='GET')
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with open_same_origin(request, self.timeout_seconds) as response:
                 lines = response.read().decode('utf-8').splitlines()
         except Exception as exc:  # noqa: BLE001
             raise SourceQueryError(f'ClickHouse query failed for rule {self.rule.name!r}: {exc}') from exc

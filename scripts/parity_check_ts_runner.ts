@@ -34,6 +34,7 @@ const main = () => {
       confidenceScore: point.confidenceScore,
       confidenceLabel: point.confidenceLabel,
       dataQualityLabel: point.dataQualityLabel,
+      decisionState: point.decisionState,
     })),
   }));
   process.stdout.write(JSON.stringify(result));

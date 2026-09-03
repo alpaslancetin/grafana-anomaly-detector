@@ -72,4 +72,67 @@ describe('canonical anomaly scoring', () => {
     expect(resolveValueDomain([-25, 10, 20], [10, 20]).min).toBe(0);
     expect(resolveValueDomain([-25, 10, 20], [-5, 20]).min).toBeLessThan(0);
   });
+
+  it('applies Elastic-style high mean and low mean direction policies', () => {
+    const highScenario = [...Array.from({ length: 12 }, (_, index) => buildRawPoint(index, 100)), buildRawPoint(12, 160)];
+    const lowScenario = [...Array.from({ length: 12 }, (_, index) => buildRawPoint(index, 100)), buildRawPoint(12, 40)];
+
+    const highAllowed = analyzePoints(highScenario, { ...baseOptions, anomalyDirection: 'high_mean' }).at(-1)!;
+    const highBlocked = analyzePoints(highScenario, { ...baseOptions, anomalyDirection: 'low_mean' }).at(-1)!;
+    const lowAllowed = analyzePoints(lowScenario, { ...baseOptions, anomalyDirection: 'low_mean' }).at(-1)!;
+    const lowBlocked = analyzePoints(lowScenario, { ...baseOptions, anomalyDirection: 'high_mean' }).at(-1)!;
+
+    expect(highAllowed.isAnomaly).toBe(true);
+    expect(lowAllowed.isAnomaly).toBe(true);
+    expect(highBlocked.isAnomaly).toBe(false);
+    expect(lowBlocked.isAnomaly).toBe(false);
+    expect(highBlocked.severityScore).toBe(0);
+    expect(lowBlocked.severityLabel).toBe('normal');
+  });
+
+  it('requires the configured N-of-M persistence and deviation floors', () => {
+    const points = [
+      ...Array.from({ length: 12 }, (_, index) => buildRawPoint(index, 100)),
+      ...Array.from({ length: 4 }, (_, index) => buildRawPoint(12 + index, 160)),
+    ];
+    const result = analyzePoints(points, {
+      ...baseOptions,
+      algorithm: 'mad',
+      anomalyDirection: 'high_mean',
+      persistenceBuckets: 3,
+      persistenceWindow: 4,
+    });
+    expect(result.slice(12, 14).every((point) => !point.isAnomaly)).toBe(true);
+    expect(result[14].isAnomaly).toBe(true);
+
+    const floorBlocked = analyzePoints(
+      [...Array.from({ length: 12 }, (_, index) => buildRawPoint(index, 100)), buildRawPoint(12, 109)],
+      { ...baseOptions, algorithm: 'mad', minimumAbsoluteDeviation: 10 }
+    ).at(-1)!;
+    expect(floorBlocked.isAnomaly).toBe(false);
+    expect(floorBlocked.score).toBeGreaterThanOrEqual(baseOptions.sensitivity);
+    expect(floorBlocked.severityScore).toBe(0);
+  });
+
+  it('holds, recovers, and cools down an incident without changing raw diagnostic scores', () => {
+    const values = [...Array.from({ length: 6 }, () => [99, 101]).flat(), 108, 108, 108, 103, 100, 100, 108, 108, 108];
+    const result = analyzePoints(
+      values.map((value, index) => buildRawPoint(index, value)),
+      {
+        ...baseOptions,
+        algorithm: 'mad',
+        anomalyDirection: 'high_mean',
+        persistenceBuckets: 2,
+        persistenceWindow: 3,
+        recoveryThreshold: 2,
+        recoveryBuckets: 2,
+        cooldownBuckets: 2,
+      }
+    );
+
+    expect(result.some((point) => point.decisionState === 'open')).toBe(true);
+    expect(result.some((point) => point.decisionState === 'recovering')).toBe(true);
+    expect(result.some((point) => point.decisionState === 'cooldown')).toBe(true);
+    expect(result.filter((point) => point.decisionState === 'cooldown').every((point) => point.severityScore === 0)).toBe(true);
+  });
 });

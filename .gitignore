@@ -44,6 +44,8 @@ Thumbs.db
 # Runtime state
 /prometheus-live-demo/anomaly_exporter/state/*.json
 /release/alert-bundle/exporter/state/*.json
+/multi-sink-demo/exporter/state/*.bak
+/multi-sink-demo/exporter/state/*.lock
 /.compat/
 **/.portable-runtime/
 /output/

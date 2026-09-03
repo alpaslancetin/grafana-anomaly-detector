@@ -13,6 +13,7 @@ SEVERITY_THRESHOLDS: dict[str, SeverityThresholds] = {
 }
 
 SUPPORTED_ALGORITHMS = {'zscore', 'mad', 'ewma', 'seasonal', 'level_shift'}
+SUPPORTED_ANOMALY_DIRECTIONS = {'high_mean', 'low_mean', 'high_or_low'}
 SUPPORTED_SEASONAL_REFINEMENTS = {'cycle', 'hour_of_day', 'weekday_hour'}
 SUPPORTED_SEVERITY_PRESETS = set(SEVERITY_THRESHOLDS.keys())
 SUPPORTED_AGGREGATIONS = {'max', 'top3_avg'}
@@ -34,6 +35,18 @@ class GlobalConfig:
     listen_host: str = '0.0.0.0'
     listen_port: int = 9110
     config_reload_interval_seconds: int = 10
+    base_path: str = ''
+    cors_allowed_origins: list[str] = field(default_factory=list)
+    api_token_env: str = ''
+    max_request_body_bytes: int = 1_048_576
+    allowed_datasource_hosts: list[str] = field(default_factory=list)
+    max_dynamic_rules: int = 5000
+    max_rules_per_panel: int = 50
+    max_query_length: int = 16384
+    max_feed_series: int = 1000
+    runtime_scope_ttl_seconds: int = 3600
+    pushed_feed_ttl_seconds: int = 300
+    api_rate_limit_per_minute: int = 120
 
 
 @dataclass(**DATACLASS_KWARGS)
@@ -47,6 +60,16 @@ class RuleConfig:
     step_seconds: int = 0
     bucket_span_seconds: int = 0
     algorithm: str = 'mad'
+    anomaly_direction: str = 'high_or_low'
+    minimum_absolute_deviation: float = 0.0
+    minimum_relative_deviation: float = 0.0
+    minimum_activity: float = 0.0
+    persistence_buckets: int = 1
+    persistence_window: int = 1
+    recovery_threshold: float = 0.0
+    recovery_buckets: int = 1
+    cooldown_buckets: int = 0
+    data_quality_gate: bool = False
     threshold: float = 4.0
     baseline_window: int = 12
     seasonality_samples: int = 24
@@ -102,7 +125,11 @@ class SeriesState:
     history: Deque[SampleHistoryEntry]
     residuals: Deque[float]
     seasonal_history: DefaultDict[str, Deque[float]]
+    decision_history: Deque[bool]
     ewma_baseline: float | None = None
+    incident_open: bool = False
+    recovery_count: int = 0
+    cooldown_remaining: int = 0
 
     @classmethod
     def create(cls, history_limit: int, seasonal_window: int) -> 'SeriesState':
@@ -110,6 +137,7 @@ class SeriesState:
             history=deque(maxlen=history_limit),
             residuals=deque(maxlen=max(history_limit, seasonal_window * 4)),
             seasonal_history=defaultdict(lambda: deque(maxlen=max(seasonal_window, 2))),
+            decision_history=deque(maxlen=max(history_limit, 4)),
         )
 
 
@@ -148,6 +176,7 @@ class SeriesSnapshot:
     algorithm: str
     severity_preset: str
     timestamp: float
+    decision_state: str = 'normal'
 
 
 @dataclass(**DATACLASS_KWARGS)
@@ -163,3 +192,6 @@ class RuleSnapshot:
     max_severity_label: str
     active_series: int
     timestamp: float
+    active_incidents: int = 0
+    data_state: str = 'ok'
+    last_data_timestamp: float = 0.0

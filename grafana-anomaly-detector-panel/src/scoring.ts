@@ -1,8 +1,9 @@
-import { BucketSpan, DetectionAlgorithm, SeasonalRefinement, SeverityPreset } from './types';
+import { AnomalyDirection, BucketSpan, DetectionAlgorithm, SeasonalRefinement, SeverityPreset } from './types';
 
 export type SeverityLabel = 'normal' | 'low' | 'medium' | 'high' | 'critical';
 export type ConfidenceLabel = 'low' | 'medium' | 'high';
 export type DataQualityLabel = 'healthy' | 'thin' | 'flatline' | 'gappy';
+export type DecisionState = 'normal' | 'candidate' | 'open' | 'recovering' | 'cooldown' | 'warming_up';
 
 export interface SeverityState {
   severityScore: number;
@@ -39,6 +40,7 @@ export interface SamplePoint extends RawPoint, SeverityState, ConfidenceState {
   windowScore: number;
   scoreDriver: 'point' | 'window';
   isAnomaly: boolean;
+  decisionState: DecisionState;
 }
 
 export interface PreparedSeries {
@@ -47,6 +49,16 @@ export interface PreparedSeries {
 
 export interface ScoringOptions {
   algorithm: DetectionAlgorithm;
+  anomalyDirection?: AnomalyDirection;
+  minimumAbsoluteDeviation?: number;
+  minimumRelativeDeviation?: number;
+  minimumActivity?: number;
+  persistenceBuckets?: number;
+  persistenceWindow?: number;
+  recoveryThreshold?: number;
+  recoveryBuckets?: number;
+  cooldownBuckets?: number;
+  dataQualityGate?: boolean;
   sensitivity: number;
   baselineWindow: number;
   seasonalitySamples: number;
@@ -413,6 +425,7 @@ const buildEmptyPoint = (point: RawPoint, threshold: number, severityPreset: Sev
     windowScore: 0,
     scoreDriver: 'point',
     isAnomaly: false,
+    decisionState: 'warming_up',
     ...severity,
     confidenceScore: 5,
     confidenceLabel: 'low',
@@ -445,6 +458,7 @@ const buildZScorePoints = (points: RawPoint[], threshold: number, window: number
       windowScore,
       scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
+      decisionState: score >= threshold ? 'open' : 'normal',
       ...severity,
       ...confidence,
     };
@@ -476,6 +490,7 @@ const buildMadPoints = (points: RawPoint[], threshold: number, window: number, s
       windowScore,
       scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
+      decisionState: score >= threshold ? 'open' : 'normal',
       ...severity,
       ...confidence,
     };
@@ -520,6 +535,7 @@ const buildEwmaPoints = (points: RawPoint[], threshold: number, window: number, 
       windowScore,
       scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
+      decisionState: score >= threshold ? 'open' : 'normal',
       ...severity,
       ...confidence,
     });
@@ -587,6 +603,7 @@ const buildSeasonalPoints = (
       windowScore,
       scoreDriver: windowScore > pointScore ? 'window' : 'point',
       isAnomaly: score >= threshold,
+      decisionState: score >= threshold ? 'open' : 'normal',
       ...severity,
       ...confidence,
     };
@@ -652,6 +669,7 @@ const buildLevelShiftPoints = (points: RawPoint[], threshold: number, window: nu
       windowScore,
       scoreDriver: windowScore >= pointScore * 0.85 ? 'window' : 'point',
       isAnomaly: score >= threshold,
+      decisionState: score >= threshold ? 'open' : 'normal',
       ...severity,
       ...confidence,
     };
@@ -683,10 +701,105 @@ export const analyzePoints = (points: RawPoint[], options: ScoringOptions): Samp
       break;
   }
 
-  return scoredPoints.map((point) => ({
-    ...point,
-    score: boundRawScore(point.score),
-    pointScore: boundRawScore(point.pointScore),
-    windowScore: boundRawScore(point.windowScore),
-  }));
+  const direction = options.anomalyDirection ?? 'high_or_low';
+  const minimumAbsoluteDeviation = Math.max(0, options.minimumAbsoluteDeviation ?? 0);
+  const minimumRelativeDeviation = Math.max(0, options.minimumRelativeDeviation ?? 0);
+  const minimumActivity = Math.max(0, options.minimumActivity ?? 0);
+  const persistenceWindow = Math.max(1, Math.round(options.persistenceWindow ?? 1));
+  const persistenceBuckets = Math.max(1, Math.min(persistenceWindow, Math.round(options.persistenceBuckets ?? 1)));
+  const recoveryThreshold = Math.max(0, Math.min(threshold, options.recoveryThreshold ?? 0));
+  const recoveryBuckets = Math.max(1, Math.round(options.recoveryBuckets ?? 1));
+  const cooldownBuckets = Math.max(0, Math.round(options.cooldownBuckets ?? 0));
+  const decisionPolicyEnabled =
+    direction !== 'high_or_low' ||
+    minimumAbsoluteDeviation > 0 ||
+    minimumRelativeDeviation > 0 ||
+    minimumActivity > 0 ||
+    persistenceBuckets > 1 ||
+    recoveryThreshold > 0 ||
+    recoveryBuckets > 1 ||
+    cooldownBuckets > 0 ||
+    options.dataQualityGate === true;
+
+  if (!decisionPolicyEnabled) {
+    return scoredPoints.map((point) => ({
+      ...point,
+      score: boundRawScore(point.score),
+      pointScore: boundRawScore(point.pointScore),
+      windowScore: boundRawScore(point.windowScore),
+      decisionState: point.isAnomaly ? 'open' : point.expected === null ? 'warming_up' : 'normal',
+    }));
+  }
+
+  const isCandidate = (point: SamplePoint, candidateThreshold: number): boolean => {
+    const deviation = point.expected === null ? 0 : point.value - point.expected;
+    const directionMatches =
+      direction === 'high_or_low' || (direction === 'high_mean' && deviation > 0) || (direction === 'low_mean' && deviation < 0);
+    const absoluteDeviation = Math.abs(deviation);
+    const relativeDeviation = point.expected === null ? 0 : absoluteDeviation / Math.max(Math.abs(point.expected), 1e-9);
+    const qualityMatches = options.dataQualityGate !== true || point.dataQualityLabel === 'healthy';
+    return (
+      point.score >= candidateThreshold &&
+      directionMatches &&
+      absoluteDeviation >= minimumAbsoluteDeviation &&
+      relativeDeviation >= minimumRelativeDeviation &&
+      Math.max(Math.abs(point.value), Math.abs(point.expected ?? 0)) >= minimumActivity &&
+      qualityMatches
+    );
+  };
+
+  const openCandidates = scoredPoints.map((point) => isCandidate(point, threshold));
+  const closeThreshold = recoveryThreshold > 0 ? recoveryThreshold : threshold;
+  const holdCandidates = scoredPoints.map((point) => isCandidate(point, closeThreshold));
+  const recent: boolean[] = [];
+  let incidentOpen = false;
+  let recoveryCount = 0;
+  let cooldownRemaining = 0;
+
+  return scoredPoints.map((point, index) => {
+    const boundedPoint = {
+      ...point,
+      score: boundRawScore(point.score),
+      pointScore: boundRawScore(point.pointScore),
+      windowScore: boundRawScore(point.windowScore),
+    };
+    const openCandidate = openCandidates[index];
+    const holdCandidate = holdCandidates[index];
+    recent.push(openCandidate);
+    if (recent.length > persistenceWindow) {
+      recent.shift();
+    }
+
+    if (incidentOpen) {
+      if (holdCandidate) {
+        recoveryCount = 0;
+        return { ...boundedPoint, isAnomaly: true, decisionState: 'open' as const };
+      }
+      recoveryCount += 1;
+      if (recoveryCount < recoveryBuckets) {
+        return { ...boundedPoint, isAnomaly: true, decisionState: 'recovering' as const };
+      }
+      incidentOpen = false;
+      recoveryCount = 0;
+      cooldownRemaining = cooldownBuckets;
+    }
+
+    if (cooldownRemaining > 0) {
+      cooldownRemaining -= 1;
+      return { ...boundedPoint, isAnomaly: false, severityScore: 0, severityLabel: 'normal' as const, decisionState: 'cooldown' as const };
+    }
+
+    if (openCandidate && recent.filter(Boolean).length >= persistenceBuckets) {
+      incidentOpen = true;
+      return { ...boundedPoint, isAnomaly: true, decisionState: 'open' as const };
+    }
+
+    return {
+      ...boundedPoint,
+      isAnomaly: false,
+      severityScore: 0,
+      severityLabel: 'normal' as const,
+      decisionState: openCandidate ? ('candidate' as const) : point.expected === null ? ('warming_up' as const) : ('normal' as const),
+    };
+  });
 };

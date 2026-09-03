@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 
 from ..models import PrometheusRangeSeries, PrometheusSample
+from ..http_security import open_same_origin
 from .base import BaseSourceReader, SourceQueryError, grouped_series, labels_from_row, parse_timestamp
 
 
@@ -26,13 +27,13 @@ class InfluxDBSourceReader(BaseSourceReader):
             headers['Authorization'] = f'Token {token}'
         request = urllib.request.Request(url=url, method='POST', data=body, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with open_same_origin(request, self.timeout_seconds) as response:
                 text = response.read().decode('utf-8')
         except Exception as exc:  # noqa: BLE001
             raise SourceQueryError(f'InfluxDB query failed for rule {self.rule.name!r}: {exc}') from exc
 
         samples: list[PrometheusSample] = []
-        for row in csv.DictReader(line for line in io.StringIO(text) if not line.startswith('#')):
+        for row in _iter_flux_rows(text):
             value = row.get('_value')
             if value is None:
                 continue
@@ -41,6 +42,20 @@ class InfluxDBSourceReader(BaseSourceReader):
             except (SourceQueryError, TypeError, ValueError):
                 continue
         return grouped_series(self.rule.name, samples)
+
+
+def _iter_flux_rows(text: str):
+    """Yield rows from every annotated-CSV table using that table's own header."""
+    header: list[str] | None = None
+    for values in csv.reader(io.StringIO(text)):
+        if not values or (values[0].startswith('#') if values else False):
+            continue
+        if '_time' in values and '_value' in values:
+            header = values
+            continue
+        if header is None or len(values) != len(header):
+            continue
+        yield dict(zip(header, values))
 
 
 def _expand_grafana_macros(query: str, start_time: float, end_time: float, step_seconds: int) -> str:

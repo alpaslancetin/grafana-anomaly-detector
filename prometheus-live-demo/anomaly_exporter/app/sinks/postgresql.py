@@ -68,8 +68,8 @@ class PostgreSQLSink(AnomalySink):
         sql = (
             f'INSERT INTO {self.table} '
             '(ts, record_type, rule, source_metric, labels, score, raw_score, confidence_score, value, expected, deviation, '
-            'lower_bound, upper_bound, is_anomaly, severity_label, algorithm) '
-            'VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
+            'lower_bound, upper_bound, is_anomaly, severity_label, algorithm, decision_state, data_state) '
+            'VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
         )
         with connection.cursor() as cursor:
             cursor.executemany(sql, rows)
@@ -96,11 +96,15 @@ class PostgreSQLSink(AnomalySink):
                   upper_bound double precision,
                   is_anomaly boolean,
                   severity_label text,
-                  algorithm text
+                  algorithm text,
+                  decision_state text,
+                  data_state text
                 )
                 '''
             )
             cursor.execute(f"ALTER TABLE {self.table} ADD COLUMN IF NOT EXISTS record_type text NOT NULL DEFAULT 'series'")
+            cursor.execute(f"ALTER TABLE {self.table} ADD COLUMN IF NOT EXISTS decision_state text")
+            cursor.execute(f"ALTER TABLE {self.table} ADD COLUMN IF NOT EXISTS data_state text")
         connection.commit()
 
     def _row(self, record: dict[str, object]) -> tuple[object, ...]:
@@ -121,6 +125,8 @@ class PostgreSQLSink(AnomalySink):
             bool(record.get('is_anomaly')),
             record.get('severity_label'),
             record.get('algorithm'),
+            record.get('decision_state'),
+            record.get('data_state'),
         )
 
 

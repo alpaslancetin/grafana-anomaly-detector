@@ -56,6 +56,7 @@ def _build_prometheus_query(rule_name: str) -> dict[str, str]:
         'datasourceType': 'prometheus',
         'query': f'max_over_time(grafana_anomaly_rule_score{{rule="{rule}"}}[5m])',
         'perSeriesQuery': f'grafana_anomaly_score{{rule="{rule}"}}',
+        'activeQuery': f'grafana_anomaly_rule_is_anomaly{{rule="{rule}"}} == 1',
     }
 
 
@@ -66,6 +67,7 @@ def _build_loki_query(rule_name: str) -> dict[str, str]:
         'datasourceType': 'loki',
         'query': f'max_over_time({{record_type="rule",rule="{rule}"}} | json normalized_score="normalized_score" | unwrap normalized_score [5m])',
         'perSeriesQuery': f'max_over_time({{record_type="series",rule="{rule}"}} | json normalized_score="normalized_score" | unwrap normalized_score [5m])',
+        'activeQuery': f'max_over_time({{record_type="rule",rule="{rule}"}} | json breach_count="breach_count" | unwrap breach_count [2m]) > 0',
     }
 
 
@@ -81,6 +83,7 @@ def _build_influxdb_query(rule_name: str, settings: dict[str, Any]) -> dict[str,
             'datasourceType': 'influxdb',
             'query': f'SELECT max("score") FROM "{measurement_influxql}" WHERE "record_type" = \'rule\' AND "rule" = \'{rule_influxql}\' AND time > now() - 5m',
             'perSeriesQuery': f'SELECT max("score") FROM "{measurement_influxql}" WHERE "record_type" = \'series\' AND "rule" = \'{rule_influxql}\' AND time > now() - 5m GROUP BY "source_metric"',
+            'activeQuery': f'SELECT last("is_anomaly") FROM "{measurement_influxql}" WHERE "record_type" = \'rule\' AND "rule" = \'{rule_influxql}\' AND time > now() - 5m',
         }
 
     bucket = _escape_flux_string(str(settings.get('bucket') or 'anomaly'))
@@ -90,6 +93,7 @@ def _build_influxdb_query(rule_name: str, settings: dict[str, Any]) -> dict[str,
         'datasourceType': 'influxdb',
         'query': f'{base} and r.record_type == "rule" and r.rule == "{rule}") |> aggregateWindow(every: 1m, fn: max, createEmpty: false) |> yield(name: "score")',
         'perSeriesQuery': f'{base} and r.record_type == "series" and r.rule == "{rule}") |> aggregateWindow(every: 1m, fn: max, createEmpty: false) |> yield(name: "series_score")',
+        'activeQuery': f'from(bucket: "{bucket}") |> range(start: -5m) |> filter(fn: (r) => r._measurement == "{measurement}" and r._field == "is_anomaly" and r.record_type == "rule" and r.rule == "{rule}") |> last()',
     }
 
 
@@ -101,6 +105,7 @@ def _build_postgresql_query(rule_name: str, settings: dict[str, Any]) -> dict[st
         'datasourceType': 'postgres',
         'query': f"SELECT $__timeGroup(ts, '1m') AS time, max(score) AS score FROM {table} WHERE $__timeFilter(ts) AND record_type = 'rule' AND rule = '{rule}' GROUP BY 1 ORDER BY 1",
         'perSeriesQuery': f"SELECT $__timeGroup(ts, '1m') AS time, source_metric, max(score) AS score FROM {table} WHERE $__timeFilter(ts) AND record_type = 'series' AND rule = '{rule}' GROUP BY 1, source_metric ORDER BY 1",
+        'activeQuery': f"SELECT ts AS time, is_anomaly FROM {table} WHERE $__timeFilter(ts) AND record_type = 'rule' AND rule = '{rule}' ORDER BY ts DESC LIMIT 1",
     }
 
 
@@ -114,6 +119,7 @@ def _build_clickhouse_query(rule_name: str, settings: dict[str, Any]) -> dict[st
         'datasourceType': 'grafana-clickhouse-datasource',
         'query': f"SELECT toStartOfMinute(ts) AS time, max(score) AS score FROM {relation} WHERE $__timeFilter(ts) AND record_type = 'rule' AND rule = '{rule}' GROUP BY time ORDER BY time",
         'perSeriesQuery': f"SELECT toStartOfMinute(ts) AS time, source_metric, max(score) AS score FROM {relation} WHERE $__timeFilter(ts) AND record_type = 'series' AND rule = '{rule}' GROUP BY time, source_metric ORDER BY time",
+        'activeQuery': f"SELECT ts AS time, is_anomaly FROM {relation} WHERE $__timeFilter(ts) AND record_type = 'rule' AND rule = '{rule}' ORDER BY ts DESC LIMIT 1",
     }
 
 
@@ -134,11 +140,19 @@ def _build_elasticsearch_query(rule_name: str, settings: dict[str, Any]) -> dict
         'metric': 'max(normalized_score)',
         'group_by': 'date_histogram(@timestamp, 1m) + source_metric',
     }
+    active_query = {
+        'index': f'{index_prefix}-*',
+        'timeField': '@timestamp',
+        'query': f'record_type:rule AND rule:"{rule}" AND is_anomaly:true',
+        'metric': 'count',
+        'group_by': 'date_histogram(@timestamp, 1m)',
+    }
     return {
         'queryLanguage': 'Elasticsearch',
         'datasourceType': 'elasticsearch',
         'query': json.dumps(rule_query, separators=(',', ':')),
         'perSeriesQuery': json.dumps(series_query, separators=(',', ':')),
+        'activeQuery': json.dumps(active_query, separators=(',', ':')),
     }
 
 

@@ -7,6 +7,23 @@ global:
   listen_host: 0.0.0.0
   listen_port: 9110
   config_reload_interval_seconds: 10
+  # Optional reverse-proxy prefix. Root routes remain available for compatibility.
+  base_path: ''
+  # Empty keeps the portable same-host setup open. Production should list Grafana origins.
+  cors_allowed_origins: []
+  # Optional environment variable containing the bearer token, for example ANOMALY_API_TOKEN.
+  api_token_env: ''
+  max_request_body_bytes: 1048576
+  # Optional SSRF guard. Use hostnames (or hostname:port) reachable by the exporter.
+  allowed_datasource_hosts: []
+  # API and dynamic-rule lifecycle safety limits.
+  max_dynamic_rules: 5000
+  max_rules_per_panel: 50
+  max_query_length: 16384
+  max_feed_series: 1000
+  runtime_scope_ttl_seconds: 3600
+  pushed_feed_ttl_seconds: 300
+  api_rate_limit_per_minute: 120
 
 rules:
   - name: example_prometheus_up
@@ -17,8 +34,20 @@ rules:
     step_seconds: 15
     bucket_span_seconds: 60
     algorithm: mad
+    # Elastic-style direction: high_mean, low_mean, or high_or_low.
+    anomaly_direction: high_mean
     threshold: 4.0
     baseline_window: 12
+    minimum_absolute_deviation: 0
+    minimum_relative_deviation: 0
+    minimum_activity: 0
+    persistence_buckets: 3
+    persistence_window: 4
+    # Close below 3.0 for 2 evaluations, then wait 2 evaluations before reopening.
+    recovery_threshold: 3.0
+    recovery_buckets: 2
+    cooldown_buckets: 2
+    data_quality_gate: true
     severity_preset: page_first
     aggregation: max
     labels:
