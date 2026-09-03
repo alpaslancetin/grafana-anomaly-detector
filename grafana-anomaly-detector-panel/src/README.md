@@ -1,50 +1,31 @@
-<!-- This README file is going to be the one displayed on the Grafana.com website for your plugin. Uncomment and replace the content here before publishing.
+# Grafana Anomaly Detector
 
-Remove any remaining comments before publishing as these may be displayed on Grafana.com -->
+Plugin version: **1.5.0**. Plugin ID: `alpas-anomalydetector-panel`.
 
-# Anomaly-Detector
+Analyze numeric time-series with z-score, rolling MAD, EWMA, seasonal, or level-shift detection. Inspect expected bands, severity, confidence, data quality, and incident details.
 
-<!-- To help maximize the impact of your README and improve usability for users, we propose the following loose structure:
+## Install
 
-**BEFORE YOU BEGIN**
-- Ensure all links are absolute URLs so that they will work when the README is displayed within Grafana and Grafana.com
-- Be inspired ✨
-  - [grafana-polystat-panel](https://github.com/grafana/grafana-polystat-panel)
-  - [volkovlabs-variable-panel](https://github.com/volkovlabs/volkovlabs-variable-panel)
+1. Download the plugin ZIP from the [v1.5.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0).
+2. Extract its contents into `<grafana-plugins>/alpas-anomalydetector-panel/`.
+3. This build is unsigned. Add `allow_loading_unsigned_plugins = alpas-anomalydetector-panel` under `[plugins]` in the active Grafana configuration.
+4. Restart Grafana, refresh the browser, and choose Anomaly Detector as the panel visualization.
 
-**ADD SOME BADGES**
+Grafana 11.6.7 or later is required. Runtime checks were performed on 11.6.7 and 12.4.0.
 
-Badges convey useful information at a glance for users whether in the Catalog or viewing the source code. You can use the generator on [Shields.io](https://shields.io/badges/dynamic-json-badge) together with the Grafana.com API
-to create dynamic badges that update automatically when you publish a new version to the marketplace.
+## Configure
 
-- For the URL parameter use `https://grafana.com/api/plugins/your-plugin-id`.
-- Example queries:
-  - Downloads: `$.downloads`
-  - Catalog Version: `$.version`
-  - Grafana Dependency: `$.grafanaDependency`
-  - Signature Type: `$.versionSignatureType`
-- Optionally, for the logo parameter use `grafana`.
+Use Recommended mode for metric-aware defaults, or Advanced mode to choose the algorithm, detection direction, threshold, floors, persistence, and recovery behavior. Visible sections controls layout only. Focus band and export blocks are optional.
 
-Full example: ![Dynamic JSON Badge](https://img.shields.io/badge/dynamic/json?logo=grafana&query=$.version&url=https://grafana.com/api/plugins/grafana-polystat-panel&label=Marketplace&prefix=v&color=F47A20)
+## Continuous score feed
 
-Consider other [badges](https://shields.io/badges) as you feel appropriate for your project.
+The optional exporter is version 1.5.0 and requires Python 3.9 or later. Choose one target, save the dashboard, and sync the query/settings to the exporter. Registered sources can then be recomputed without keeping the panel open. The exporter needs source credentials, network access, and durable state.
 
-## Overview / Introduction
-Provide one or more paragraphs as an introduction to your plugin to help users understand why they should use it.
+Targets are Prometheus metrics, Loki, InfluxDB, PostgreSQL, ClickHouse, and Elasticsearch. Prometheus is not required for a non-Prometheus source/target flow. Copy the target-specific query into Grafana Alerting and configure routing and No Data/Error behavior; opening the builder does not save a rule automatically.
 
-Consider including screenshots:
-- in [plugin.json](https://grafana.com/developers/plugin-tools/reference/plugin-json#info) include them as relative links.
-- in the README ensure they are absolute URLs.
+## Documentation and limitations
 
-## Requirements
-List any requirements or dependencies they may need to run the plugin.
+- [Current installation and upgrade guide](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md)
+- [Verified release scope and remaining work](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/STATUS_v1.5.0.md)
 
-## Getting Started
-Provide a quick start on how to configure and use the plugin.
-
-## Documentation
-If your project has dedicated documentation available for users, provide links here. For help in following Grafana's style recommendations for technical documentation, refer to our [Writer's Toolkit](https://grafana.com/docs/writers-toolkit/).
-
-## Contributing
-Do you want folks to contribute to the plugin or provide feedback through specific means? If so, tell them how!
--->
+The chart uses custom SVG. Native Time Series multi-axis, zoom/pan and shared-cursor parity is not complete.

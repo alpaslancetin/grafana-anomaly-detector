@@ -35,8 +35,19 @@ This release makes anomaly decisions direction-aware and hardens the plugin-to-e
 
 Upgrade the exporter first, validate `/api/capabilities`, then install the plugin.
 
+## Scope and limitations
+
+The plugin is unsigned. This release retains the custom SVG chart; native Grafana Time Series multi-axis, zoom/pan, shared cursor, and the full small-panel/visibility visual matrix are not complete. Real labeled field-data backtesting, long soak/load qualification, signing, and production canary execution remain required before organization-specific production acceptance.
+
+See the [current scope report](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/STATUS_v1.5.0.md) and [installation guide](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md). Historical PDFs and screenshots are references, not a v1.5.0 visual acceptance baseline.
+
+The published v1.5.0 tag and binary ZIPs retain their original checksums. Subsequent documentation clarifications on main do not change the release's scoring implementation.
+
 ## Assets
 
 - `grafana-anomaly-detector-plugin.zip`
 - `grafana-anomaly-exporter-bundle-1.5.0.zip`
 - `SHA256SUMS_v1.5.0.txt`
+- `GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md`
+- `PACKAGE_CONTENTS_v1.5.0_TR.md`
+- `STATUS_v1.5.0.md` (current documentation clarification; not part of the original binary build)

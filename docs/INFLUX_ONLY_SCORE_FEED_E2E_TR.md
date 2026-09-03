@@ -1,5 +1,7 @@
 # InfluxDB Source -> InfluxDB Score Feed -> Grafana Alert E2E Kurulum
 
+> Tarihsel referans: Guncel paket adlari, API schema 3 ve kurulum adimlari icin [v1.5.0 kilavuzunu](../release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md) kullanin. Influx-only akis Prometheus gerektirmez.
+
 Bu dokuman InfluxDB'deki metrikleri Grafana Anomaly Detector ile analiz edip hesaplanan anomaly score kayitlarini yine InfluxDB'ye yazmak ve Grafana Alerting tarafinda InfluxDB datasource uzerinden alarm uretmek icin hazirlandi.
 
 ## Prometheus gerekli mi?

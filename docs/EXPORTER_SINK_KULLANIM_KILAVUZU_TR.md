@@ -1,5 +1,7 @@
 # Exporter, Source Reader ve Sink Kullanim Kilavuzu
 
+> Tarihsel referans: Bu kilavuz v1.5.0 oncesi akisi anlatir. Guncel kurulum ve konfigurasyon icin [v1.5.0 kilavuzunu](../release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md) kullanin.
+
 Bu dokuman Grafana Anomaly Detector paneli ile exporter arasindaki score feed akisini, sink hedeflerini ve panel kapaliyken score'un nasil uretilmeye devam ettigini aciklar.
 
 ## Temel Kavramlar

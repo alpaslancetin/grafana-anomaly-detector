@@ -17,6 +17,12 @@
 
 ---
 
+## Current release: v1.5.0
+
+Plugin **1.5.0**, exporter **1.5.0**, API schema **3**. Download the matched packages from the [v1.5.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0), then follow the [current installation and upgrade guide](release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md).
+
+See [release scope and remaining work](release/STATUS_v1.5.0.md) for verified coverage and limitations. The plugin is unsigned; full native Grafana Time Series chart parity is not claimed.
+
 ## ✨ Why this project stands out
 
 - **Panel-native anomaly detection**: analyze time-series directly where operators already work.
@@ -35,6 +41,8 @@
 | Delivery | Source code, live demo stack, release zips, GitHub release notes |
 
 ## 🖼️ Product view
+
+These screenshots illustrate the product workflow; they are not a pixel-by-pixel acceptance baseline for v1.5.0. Refer to the current guide and release scope for supported controls.
 
 <table>
   <tr>
@@ -94,8 +102,8 @@ flowchart LR
 2. Choose `Recommended` for guided defaults or `Advanced` for manual tuning.
 3. The panel computes an expected baseline and flags anomalies.
 4. Operators inspect the anomaly story inside the panel.
-5. If needed, the panel publishes the latest plugin-computed score snapshot to the exporter.
-6. The exporter exposes Prometheus metrics such as `grafana_anomaly_rule_score` and can also write the same score records to a selected sink.
+5. Save the dashboard, select one score target, and sync the source query and detection settings to the exporter.
+6. The exporter recomputes registered rules from the source without an open browser and publishes alert scores to the selected target. Panel snapshots provide a preview; continuous alerting requires a registered, exporter-readable source and healthy dependencies.
 
 ## 🔌 Plugin installation
 
@@ -126,7 +134,7 @@ allow_loading_unsigned_plugins = alpas-anomalydetector-panel
 
 ## 🚨 Score feed exporter
 
-The exporter receives plugin-computed score snapshots from Grafana panels and exposes them as Prometheus metrics. It can also write the same score records to Loki, InfluxDB, PostgreSQL, ClickHouse, or Elasticsearch when those sinks are configured.
+The exporter registers saved panel queries, recomputes their anomaly scores independently of the browser, and accepts panel preview snapshots. A panel selects one target: Prometheus metrics, Loki, InfluxDB, PostgreSQL, ClickHouse, or Elasticsearch. Prometheus is not required when neither the source nor the target is Prometheus.
 
 **Exporter source**
 
@@ -145,7 +153,7 @@ The exporter receives plugin-computed score snapshots from Grafana panels and ex
 **Minimum Python requirement**
 
 - minimum supported Python: `3.9`
-- recommended Python: `3.9.x`
+- use a maintained Python release compatible with your operating system; `3.9` is the compatibility floor, not a recommendation to use an unsupported runtime
 
 **Release package**
 
@@ -155,7 +163,7 @@ The exporter receives plugin-computed score snapshots from Grafana panels and ex
 
 - native RHEL install:
   - `./install-exporter-rhel.sh http://PROMETHEUS_HOST:PORT`
-  - then `./enable-local-prometheus-scrape-rhel.sh`
+  - this is the Prometheus recipe; use the current guide and InfluxDB template for an Influx-only deployment
 - portable mode:
   - edit the included `exporter/config.yml`, or copy `config.prometheus.yml` / `config.influxdb.yml` from `exporter/examples/`
   - `./portable-exporter.sh validate`
@@ -163,7 +171,7 @@ The exporter receives plugin-computed score snapshots from Grafana panels and ex
 - Grafana panel settings:
   - `Score feed endpoint = http://EXPORTER_HOST:9110`
   - `Score feed target = Prometheus metrics` or one specific sink target
-- Prometheus must scrape the exporter endpoint:
+- Only when using the Prometheus metrics target, configure Prometheus to scrape:
   - `127.0.0.1:9110` or the exporter host you expose
 
 **Important behavior**
@@ -391,8 +399,8 @@ Release package notes:
 1. Build an anomaly panel in Grafana.
 2. Enable `Score feed mode`.
 3. Sync the panel to the exporter.
-4. Query `grafana_anomaly_rule_score{rule="..."}` from Prometheus.
-5. Use that metric in Grafana Alerting.
+4. Copy the target-specific alert query from Score feed (PromQL, LogQL, Flux, SQL, or Elasticsearch query specification).
+5. Select the matching datasource in Grafana Alerting, configure the threshold/pending period and No Data/Error behavior, and verify notification routing. The builder handoff does not automatically save an alert rule.
 
 ## 📚 More detail
 

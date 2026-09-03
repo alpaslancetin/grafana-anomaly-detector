@@ -1,6 +1,6 @@
 # Release packages
 
-This folder contains the current `Grafana Anomaly Detector v1.5.0` release set. Older versioned notes and checksums are retained for rollback reference.
+This folder contains the current `Grafana Anomaly Detector v1.5.0` release set. Historical packages and their original checksums remain on the [v1.4.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.4.0); do not use old checksums with the current unversioned plugin ZIP.
 
 ## Artifacts
 
@@ -10,6 +10,9 @@ This folder contains the current `Grafana Anomaly Detector v1.5.0` release set. 
 - `GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md`: end-to-end Turkish guide.
 - `PACKAGE_CONTENTS_v1.5.0_TR.md`: package contents and operational notes.
 - `SHA256SUMS_v1.5.0.txt`: release integrity checksums.
+- [STATUS_v1.5.0.md](STATUS_v1.5.0.md): verified coverage, chart limitations, and remaining production qualification.
+
+The published tag and binary ZIPs are immutable for this documentation update. The current `main` documentation clarifies their scope without changing scoring code or replacing the tested packages.
 
 ## Compatibility
 
