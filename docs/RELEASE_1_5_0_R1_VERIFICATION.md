@@ -47,6 +47,16 @@ This is a maintained bug-fix package, **not unconditional production approval**.
 
 ## Distribution safety
 
+Fresh exporter ZIP extraction was tested in Python **3.9.25**: default,
+Prometheus and InfluxDB YAML validation passed, portable start/ready/status/stop
+passed, and real Prometheus input produced the example rule metrics. InfluxDB
+sample validation is not a claim that placeholder credentials/buckets work
+without editing. Two consecutive builds produced identical ZIP SHA-256 values.
+All exporter archive member hashes and the empty registry were verified.
+
+Package source commit: `93b6380` (full ID in BUILD_INFO.json). Subsequent release
+assembly commits only update artifacts/publication records, not executable source.
+
 - Versioned ZIP names for both components; stable plugin installation ID.
 - BUILD_INFO.json: source commit, package revision, per-file SHA-256 manifest.
 - SHA256SUMS_v1.5.0-r1.txt verifies the ZIPs; original release checksums remain historical.

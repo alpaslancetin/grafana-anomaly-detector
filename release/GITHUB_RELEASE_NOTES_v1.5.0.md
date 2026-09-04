@@ -1,4 +1,4 @@
-# Grafana Anomaly Detector v1.5.0
+# Grafana Anomaly Detector v1.5.0-r1
 
 Current package revision: **v1.5.0-r1**. Plugin/exporter application version remains **1.5.0**, API schema **3**. This release makes anomaly decisions direction-aware and hardens the plugin-to-exporter score-feed contract for continuous alerting.
 

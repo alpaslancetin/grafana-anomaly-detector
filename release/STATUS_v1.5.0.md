@@ -16,7 +16,7 @@ Direction-aware decisions (high_mean, low_mean, high_or_low), absolute/relative 
 
 Exporter transport includes root/base-path aliases, JSON errors, capability negotiation, atomic state with backup and process locking, idempotent registration, scoped revisions, explicit unregister, runtime-scope expiry, and configurable security/request limits.
 
-Verification recorded for this release: 30 panel unit tests, 42 exporter tests, TypeScript typecheck/build/lint, 2,001 parity cases, a 36 source-target matrix, and Python 3.9.25 portable validation. These checks are not a claim of every production workload or chart interaction being covered.
+Historical verification for the original v1.5.0 release: 30 panel unit tests, 42 exporter tests, TypeScript typecheck/build/lint, 2,001 parity cases, a 36 source-target matrix, and Python 3.9.25 portable validation. The r1 source rerun passed 35 panel tests, 44 exporter tests on two Python versions, 3,801 parity points, and 19 browser tests (one skipped). Strict detection quality and the current throughput gate have open failures; see the r1 record above. These checks are not a claim of every production workload or chart interaction being covered.
 
 Saved registrations allow exporter recomputation with the browser closed. This requires reachable sources, valid credentials, retained state, and a running exporter. Panel preview snapshots alone are not a 24/7 alerting guarantee.
 
