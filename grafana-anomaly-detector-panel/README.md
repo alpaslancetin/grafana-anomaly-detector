@@ -6,6 +6,12 @@ This package is the UI and scoring layer of the project. It detects anomalies di
 
 The public source folder uses a neutral repository name, while the plugin ID remains `alpas-anomalydetector-panel` for compatibility with installed environments.
 
+Current application version: **1.5.0**. Current package revision: **1.5.0-r1**.
+Download `grafana-anomaly-detector-plugin-1.5.0-r1.zip` from the
+[release page](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0-r1).
+The ZIP contains the unchanged `alpas-anomalydetector-panel/` installation directory
+and `BUILD_INFO.json` for source-commit and content-hash traceability.
+
 ## What is inside
 
 - React and TypeScript based Grafana panel implementation
@@ -35,7 +41,7 @@ Requirements:
 Validated compatibility:
 
 - Grafana 11.6.7
-- Grafana 12.4.1
+- Grafana 12.4.0
 
 The minimum supported version declared by the plugin manifest is `>=11.6.7`.
 

@@ -1,11 +1,13 @@
 # v1.5.0 Release Scope
 
+Current distribution: **1.5.0-r1**, application version unchanged. The original v1.5.0 release is historical. See [r1 verification](../docs/RELEASE_1_5_0_R1_VERIFICATION.md) for the current verification record.
+
 ## Versions and downloads
 
 - Plugin: 1.5.0; exporter: 1.5.0; API schema: 3.
 - Grafana compatibility floor: 11.6.7; runtime checks performed on 11.6.7 and 12.4.0.
 - Exporter Python compatibility floor: 3.9; packaged portable validation passed on Python 3.9.25.
-- [Release downloads](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0).
+- [Release downloads](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0-r1).
 - [Installation and upgrade guide](GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md).
 
 ## Completed and verified
@@ -26,7 +28,7 @@ Visible sections can hide individual UI blocks. Hiding Score feed status does no
 
 Still incomplete: multi-unit/left-right axes, full FieldConfig display semantics, log/symlog, drag zoom/pan/reset and dashboard-range integration, shared cross-panel cursor, Shift-range legend selection, complete legend calculations, and virtualized large-series rendering. Hidden-series consistency across all incident summaries still needs coverage.
 
-Responsive controls are implemented, but 240x160 layouts, all critical visibility combinations, 80-200 percent browser zoom, and comprehensive pixel/geometry regression are not fully qualified. Current chart sizing still has minimum dimensions.
+The r1 revision fixes delayed chart mounting, compact chart-only sizing and time-axis overlap. Very small 240x160 layouts, all visibility combinations, 80-200 percent browser zoom, and comprehensive pixel/geometry regression are not fully qualified. Native Grafana Time Series feature parity is not claimed.
 
 ## Production qualification still required
 

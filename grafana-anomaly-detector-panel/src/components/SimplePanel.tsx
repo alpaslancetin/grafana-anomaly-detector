@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { dateTimeFormat, FieldType, PanelProps, timeZoneAbbrevation, TimeZone } from '@grafana/data';
 import { css } from '@emotion/css';
 import { useTheme2 } from '@grafana/ui';
@@ -10,6 +10,7 @@ import {
   DetectionMode,
   MarkerShapeMode,
   MetricPreset,
+  resolveAnomalyDirection,
   ScoreFeedMode,
   ScoreFeedTarget,
   SeasonalRefinement,
@@ -913,6 +914,18 @@ const getStyles = (isDark: boolean) => ({
   metaAccent: css`
     color: #F87171;
     font-weight: 900;
+  `,
+  configurationWarning: css`
+    display: block;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid ${isDark ? '#B45309' : '#D97706'};
+    border-radius: 10px;
+    color: ${isDark ? '#FDE68A' : '#78350F'};
+    background: ${isDark ? '#292014' : '#FFFBEB'};
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   `,
   recommendationBanner: css`
     display: none;
@@ -2281,7 +2294,7 @@ const resolveOptions = (options: SimpleOptions, metricNames: string[]): Resolved
       effectiveMetricPreset: 'custom',
       detectionMode: options.detectionMode ?? 'single',
       algorithm: options.algorithm ?? 'zscore',
-      anomalyDirection: options.anomalyDirection ?? 'high_or_low',
+      anomalyDirection: resolveAnomalyDirection(options.anomalyDirection).direction,
       minimumAbsoluteDeviation: Math.max(0, options.minimumAbsoluteDeviation ?? 0),
       minimumRelativeDeviation: Math.max(0, options.minimumRelativeDeviation ?? 0),
       minimumActivity: Math.max(0, options.minimumActivity ?? 0),
@@ -5076,6 +5089,9 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const metricLabels = useMemo(() => preparedSeries.map((series) => series.label), [preparedSeries]);
   const resolvedOptions = useMemo(() => resolveOptions(options, metricLabels), [options, metricLabels]);
   const sectionVisibility = useMemo(() => resolveSectionVisibility(options), [options]);
+  const directionWarning = options.setupMode === 'advanced' || options.metricPreset === 'custom'
+    ? resolveAnomalyDirection(options.anomalyDirection).warning : null;
+  const directionNotice = directionWarning ? <div role="status" className={styles.configurationWarning}>{directionWarning}</div> : null;
   const panelFallbackTitle = options.title || 'Anomaly detector';
   const dashboardUid = getDashboardUidFromLocation();
   const [loadedSavedDashboard, setLoadedSavedDashboard] = useState<{
@@ -5178,7 +5194,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const [actionToast, setActionToast] = useState<ActionToast | null>(null);
   const [scoreFeedExpanded, setScoreFeedExpanded] = useState(false);
   const [exportsExpanded, setExportsExpanded] = useState(false);
-  const chartCardRef = useRef<HTMLDivElement | null>(null);
+  const [chartCardElement, setChartCardElement] = useState<HTMLDivElement | null>(null);
   const [chartFrame, setChartFrame] = useState<ChartFrame>({ width: 0, height: 0 });
   const activeSelection = useMemo(
     () => (selectionExists(selection, analyses, events) ? selection : summaryItems[0]?.selection ?? null),
@@ -5188,7 +5204,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
   const activeSelectionToken = selectionKey(activeSelection);
 
   useLayoutEffect(() => {
-    const element = chartCardRef.current;
+    const element = chartCardElement;
     if (!element) {
       return;
     }
@@ -5230,7 +5246,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
       }
       resizeObserver?.disconnect();
     };
-  }, [width, height, sectionVisibility.inspector, sectionVisibility.mainChart]);
+  }, [chartCardElement]);
 
   useEffect(() => {
     if (!actionToast || typeof window === 'undefined') {
@@ -5507,6 +5523,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     return (
       <div className={styles.wrapper}>
         <div className={styles.skeletonShell} aria-label="Anomaly detector is loading">
+          {directionNotice}
           <div className={`${styles.skeletonBlock} ${styles.skeletonHeader}`} />
           <div className={`${styles.skeletonBlock} ${styles.skeletonChart}`} />
           <div className={styles.skeletonRows}>
@@ -5523,6 +5540,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     return (
       <div className={styles.wrapper}>
         {sectionVisibility.scoreFeed ? scoreFeedCard : null}
+        {directionNotice}
         <div className={styles.emptyState}>Add a time series query with at least one numeric field to start anomaly analysis.</div>
       </div>
     );
@@ -5566,12 +5584,12 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     !showSideUtilities &&
     !sectionVisibility.inspector;
 
-  const fallbackChartWidth = Math.max(width - 24, 320);
+  const fallbackChartWidth = Math.max(width - 24, 120);
   const fallbackChartHeight = isChartOnly
-    ? Math.max(height - 20, 220)
+    ? Math.max(height - 24, 100)
     : Math.max(Math.min(showSecondaryDock ? height * 0.54 : height - 72, 500), 340);
-  const chartWidth = chartFrame.width > 0 ? Math.max(chartFrame.width, 260) : fallbackChartWidth;
-  const chartHeight = chartFrame.height > 0 ? Math.max(chartFrame.height, 220) : fallbackChartHeight;
+  const chartWidth = chartFrame.width > 0 ? chartFrame.width : fallbackChartWidth;
+  const chartHeight = chartFrame.height > 0 ? chartFrame.height : fallbackChartHeight;
   const chartPadding = {
     ...PADDING,
     top: chartHeight < 280 ? 18 : 24,
@@ -5607,8 +5625,10 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
     return minTime + ratio * (maxTime - minTime);
   };
 
-  const xTickCount = getTimeTickCount(chartWidth, resolvedOptions.detectionMode, resolvedOptions.timeAxisDensity, timeRangeMs);
-  const yTickCount = Math.max(5, Math.min(6, Math.round(innerHeight / 72)));
+  const requestedTickCount = getTimeTickCount(chartWidth, resolvedOptions.detectionMode, resolvedOptions.timeAxisDensity, timeRangeMs);
+  const timeLabelSpacing = getGrafanaTimeAxisFormat(timeRangeMs, resolvedOptions.timeAxisDensity).length > 5 ? 110 : 68;
+  const xTickCount = Math.min(requestedTickCount, Math.max(2, Math.floor(innerWidth / timeLabelSpacing) + 1));
+  const yTickCount = Math.max(2, Math.min(6, Math.floor(innerHeight / 48) + 1));
   const xTicks = buildLinearTicks(minTime, maxTime, xTickCount);
   const topAxisTicks =
     resolvedOptions.timeAxisPlacement === 'top_and_bottom'
@@ -6054,9 +6074,11 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
 
   return (
     <div className={styles.wrapper}>
+      {directionNotice}
       <div
         className={styles.operationalCanvas}
-        style={{ gridTemplateColumns: sectionVisibility.inspector ? undefined : 'minmax(0, 1fr)' }}
+        style={{ gridTemplateColumns: sectionVisibility.inspector ? undefined : 'minmax(0, 1fr)',
+          ...(isChartOnly ? { height: '100%', minHeight: 0 } : {}) }}
       >
         <main className={styles.workspacePane}>
           {showStatusHeader ? (
@@ -6236,8 +6258,8 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
 
       {sectionVisibility.mainChart ? <div
         className={styles.chartCard}
-        style={isChartOnly ? { minHeight: Math.max(height - 20, 220), height: '100%' } : undefined}
-        ref={chartCardRef}
+        style={isChartOnly ? { minHeight: 0, height: '100%' } : undefined}
+        ref={setChartCardElement}
         tabIndex={0}
         onKeyDown={handleChartKeyDown}
         aria-label="Anomaly chart. Use left and right arrows to move between incidents, Enter to pin, and Escape to clear."
@@ -6264,7 +6286,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
           <text transform={`translate(22 ${chartPadding.top + innerHeight / 2}) rotate(-90)`} textAnchor="middle" fill={axisCaptionColor} fontSize="11" fontWeight="700" letterSpacing="0.08em">
             VALUE
           </text>
-          <text x={chartWidth - chartPadding.right} y={chartHeight - 16} textAnchor="end" fill={axisCaptionColor} fontSize="11" fontWeight="700" letterSpacing="0.08em">
+          <text data-axis="time-caption" x={chartWidth - chartPadding.right} y={chartHeight - 8} textAnchor="end" fill={axisCaptionColor} fontSize="11" fontWeight="700" letterSpacing="0.08em">
             TIME ({timeZoneLabel})
           </text>
           {topAxisTicks.map((tick, index) => {
@@ -6310,7 +6332,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
                 {index > 0 && index < xTicks.length - 1 ? (
                   <line x1={x} y1={chartPadding.top} x2={x} y2={chartHeight - chartPadding.bottom} stroke={theme.isDark ? '#162336' : '#E2E8F0'} strokeOpacity={0.45} />
                 ) : null}
-                <text x={x} y={chartHeight - 12} textAnchor={anchor} fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="11">
+                <text data-axis="time-tick" x={x} y={chartHeight - 28} textAnchor={anchor} fill={theme.isDark ? '#94A3B8' : '#64748B'} fontSize="11">
                   {formatTimeAxisLabel(tick, timeRangeMs, resolvedOptions.timeAxisDensity, timeZone)}
                 </text>
               </g>
@@ -7129,6 +7151,7 @@ export const SimplePanel: React.FC<Props> = ({ id, options, data, width, height,
 };
 
 export const __testables = {
+  resolveOptions,
   resolveSeriesDisplayName,
   collectPreparedSeries,
   resolveSectionVisibility,

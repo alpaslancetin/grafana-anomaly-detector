@@ -1,7 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
+import { cleanupIncidentFixture, installIncidentFixture } from './incident_fixture';
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(90000);
+test.afterEach(async ({ page }) => cleanupIncidentFixture(page));
 
 const dashboardPaths = {
   testData: '/d-solo/anomaly-detector-demo/provisioned-anomaly-detector-demo?orgId=1&panelId=1',
@@ -71,7 +73,8 @@ test('renders the provisioned TestData panel and exposes point-level analysis de
   await expect(page.getByRole('button', { name: 'Copy annotation JSON' })).toBeVisible();
 });
 
-test('renders the source-matrix Prometheus panel, syncs score-feed rules, and creates annotations', async ({ page, context }) => {
+test('uses deterministic incidents to test Prometheus panel actions with live score-feed registration', async ({ page, context }) => {
+  const fixtureFrames = await installIncidentFixture(page);
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://127.0.0.1:3000' });
   await gotoSoloPanel(page, dashboardPaths.prometheusSource, 'Prometheus source -> Prometheus metrics');
 
@@ -92,6 +95,7 @@ test('renders the source-matrix Prometheus panel, syncs score-feed rules, and cr
 
   await selectFirstAnomaly(page);
 
+  expect(fixtureFrames()).toBeGreaterThan(0);
   await expect(page.getByText('Why is this anomalous?', { exact: true })).toBeVisible();
   await expect(page.getByText('Deviation', { exact: true })).toBeVisible();
   await expect(page.getByText('Confidence', { exact: true }).first()).toBeVisible();

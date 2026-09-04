@@ -2,6 +2,17 @@ export type SetupMode = 'recommended' | 'advanced';
 export type DetectionMode = 'single' | 'multi';
 export type DetectionAlgorithm = 'zscore' | 'mad' | 'ewma' | 'seasonal' | 'level_shift';
 export type AnomalyDirection = 'high_mean' | 'low_mean' | 'high_or_low';
+
+export function resolveAnomalyDirection(value: unknown): { direction: AnomalyDirection; warning: string | null } {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'high_mean' || normalized === 'low_mean' || normalized === 'high_or_low') {
+    return { direction: normalized, warning: null };
+  }
+  return {
+    direction: 'high_or_low',
+    warning: value == null ? null : 'Unsupported anomaly direction. Using high_or_low (both directions). Review Advanced tuning and save a supported direction.',
+  };
+}
 export type SeasonalRefinement = 'cycle' | 'hour_of_day' | 'weekday_hour';
 export type SeverityPreset = 'balanced' | 'warning_first' | 'page_first';
 export type MetricPreset = 'auto' | 'custom' | 'traffic' | 'latency' | 'error_rate' | 'resource' | 'business' | 'level_shift';

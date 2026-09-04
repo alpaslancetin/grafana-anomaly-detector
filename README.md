@@ -17,9 +17,11 @@
 
 ---
 
-## Current release: v1.5.0
+## Current release: v1.5.0-r1
 
-Plugin **1.5.0**, exporter **1.5.0**, API schema **3**. Download the matched packages from the [v1.5.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0), then follow the [current installation and upgrade guide](release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md).
+Plugin **1.5.0**, exporter **1.5.0**, API schema **3**; package revision **1.5.0-r1**. Download the matched packages from the [v1.5.0-r1 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0-r1), then follow the [current installation and upgrade guide](release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md). This revision includes the post-release direction, API diagnostics and compact-chart fixes. Original v1.5.0 assets remain available unchanged in their historical release.
+
+Both ZIPs have versioned filenames and a `BUILD_INFO.json` content manifest. Exporter includes `config.yml`, `examples/config.prometheus.yml`, and `examples/config.influxdb.yml`; edit endpoints and provide credentials before starting. For browser access without exposing port 9110, see the [same-origin /anomalyalarm proxy guide](docs/ANOMALYALARM_PROXY_TR.md).
 
 See [release scope and remaining work](release/STATUS_v1.5.0.md) for verified coverage and limitations. The plugin is unsigned; full native Grafana Time Series chart parity is not claimed.
 
@@ -111,7 +113,7 @@ If you only want the panel plugin, you do not need the exporter bundle.
 
 **Release package**
 
-- [`release/grafana-anomaly-detector-plugin.zip`](release/grafana-anomaly-detector-plugin.zip)
+- [`release/grafana-anomaly-detector-plugin-1.5.0-r1.zip`](release/grafana-anomaly-detector-plugin-1.5.0-r1.zip)
 
 **Typical Grafana install flow**
 
@@ -157,7 +159,7 @@ The exporter registers saved panel queries, recomputes their anomaly scores inde
 
 **Release package**
 
-- [`release/grafana-anomaly-exporter-bundle-1.5.0.zip`](release/grafana-anomaly-exporter-bundle-1.5.0.zip)
+- [`release/grafana-anomaly-exporter-bundle-1.5.0-r1.zip`](release/grafana-anomaly-exporter-bundle-1.5.0-r1.zip)
 
 **Installation notes**
 
@@ -385,8 +387,8 @@ docker compose up -d --build
 
 Main outputs under [`release/`](release):
 
-- `grafana-anomaly-detector-plugin.zip`
-- `grafana-anomaly-exporter-bundle-1.5.0.zip`
+- `grafana-anomaly-detector-plugin-1.5.0-r1.zip`
+- `grafana-anomaly-exporter-bundle-1.5.0-r1.zip`
 
 Release package notes:
 

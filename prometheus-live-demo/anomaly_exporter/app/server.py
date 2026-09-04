@@ -1120,7 +1120,10 @@ class MetricsHandler(BaseHTTPRequestHandler):
         try:
             params = parse_qs(parsed.query)
             dashboard_uid = str(params.get('dashboardUid', [''])[0]).strip()
-            panel_id = int(params.get('panelId', [''])[0])
+            raw_panel_id = params.get('panelId', [''])[0]
+            if not re.fullmatch(r'[0-9]{1,10}', raw_panel_id) or int(raw_panel_id) <= 0:
+                raise RegistrationError('panelId must be a positive integer.')
+            panel_id = int(raw_panel_id)
             scope_hash = str(params.get('scopeHash', ['saved'])[0]).strip().lower() or 'saved'
             if not dashboard_uid:
                 raise RegistrationError('dashboardUid is required.')
@@ -1245,6 +1248,7 @@ class MetricsHandler(BaseHTTPRequestHandler):
             self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Request-ID')
+        self.send_header('Access-Control-Expose-Headers', 'X-Request-ID, X-Anomaly-Exporter-Version, X-Anomaly-Schema-Version')
         self.send_header('Access-Control-Max-Age', '86400')
         self.send_header('X-Request-ID', request_id)
         self.send_header('X-Anomaly-Exporter-Version', __version__)

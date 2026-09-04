@@ -1,7 +1,53 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
+import { cleanupIncidentFixture, installIncidentFixture } from './incident_fixture';
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(120000);
+test.afterEach(async ({ page }) => cleanupIncidentFixture(page));
+
+test('chart-only panel fits small containers and keeps SVG text unscaled after delayed data', async ({ page }, testInfo) => {
+  await installIncidentFixture(page);
+  await page.route(/\/(?:api\/dashboards\/uid\/plugin-source-matrix|apis\/dashboard\.grafana\.app\/.*\/dashboards\/plugin-source-matrix\/dto)(?:\?.*)?$/, async route => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const dashboard = payload.dashboard ?? payload.spec;
+    for (const panel of dashboard.panels) {
+      panel.options = { ...panel.options, scoreFeedMode: 'off', showInitialLabels: false,
+        showStatistics: false, showInspector: false, showAnomalyFeed: false,
+        showSeriesSummary: false, showScoreFeed: false, showDetectionProfile: false,
+        showExports: false, showMainChart: true, showInlineSeriesLabels: false };
+    }
+    await route.fulfill({ response, json: payload });
+  });
+  // Route handlers run newest first; delay only arrival, then use the data fixture.
+  await page.route('**/api/ds/query*', async route => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await route.fallback();
+  });
+  await page.setViewportSize({ width: 400, height: 260 });
+  await page.goto('/d-solo/plugin-source-matrix/grafana-anomaly-plugin-source-matrix?panelId=2&from=now-30m&to=now');
+  const chart = page.getByRole('img', { name: 'Anomaly chart', exact: true });
+  await expect(chart).toBeVisible({ timeout: 60000 });
+  for (const size of [{ width: 400, height: 260 }, { width: 320, height: 200 }, { width: 600, height: 320 }, { width: 1200, height: 700 }]) {
+    await page.setViewportSize(size);
+    await expect.poll(async () => chart.evaluate(svg => {
+      const element = svg as SVGSVGElement;
+      const box = element.getBoundingClientRect();
+      const view = element.viewBox.baseVal;
+      return Math.max(Math.abs(box.width - view.width), Math.abs(box.height - view.height));
+    }), { timeout: 10000 }).toBeLessThanOrEqual(2);
+    const box = (await chart.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(size.height + 2);
+    expect(box.x + box.width).toBeLessThanOrEqual(size.width + 2);
+    const axesDoNotOverlap = await chart.evaluate(svg => {
+      const labels = [...svg.querySelectorAll('[data-axis]')].map(element => element.getBoundingClientRect());
+      return labels.length > 1 && labels.every((a, i) => labels.slice(i + 1).every(b =>
+        a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top));
+    });
+    expect(axesDoNotOverlap, 'time ticks and axis caption must not overlap').toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`chart-only-${size.width}x${size.height}.png`) });
+  }
+});
 
 const dashboardUid = 'plugin-source-matrix';
 const dashboardSlug = 'grafana-anomaly-plugin-source-matrix';

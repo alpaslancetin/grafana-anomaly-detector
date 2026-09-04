@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import math
 import random
 import sys
@@ -91,7 +92,10 @@ def evaluate(algorithm: str, values: list[float]) -> dict[str, float | int]:
     true_positive_points = len(predicted.intersection(truth))
     precision = true_positive_points / len(predicted) if predicted else 0.0
     recall = detected_events / len(windows)
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    point_recall = true_positive_points / len(truth) if truth else 0.0
+    # F1 must combine precision and recall over the same unit (points).
+    # Event recall is reported separately and must not inflate point F1.
+    f1 = 2 * precision * point_recall / (precision + point_recall) if precision + point_recall else 0.0
     false_positive_points = len(predicted.difference(truth))
     background_points = POINT_COUNT - len(truth)
     shift_hits = len(predicted.intersection(range(SHIFT_START, SHIFT_END)))
@@ -101,6 +105,7 @@ def evaluate(algorithm: str, values: list[float]) -> dict[str, float | int]:
         'events': detected_events,
         'event_recall': recall,
         'precision': precision,
+        'point_recall': point_recall,
         'f1': f1,
         'false_positive_points': false_positive_points,
         'false_positive_rate': false_positive_points / background_points,
@@ -111,14 +116,31 @@ def evaluate(algorithm: str, values: list[float]) -> dict[str, float | int]:
     }
 
 
+def production_quality_failures(results: dict) -> list[str]:
+    failures = []
+    for scenario, algorithms in results.items():
+        for algorithm, metrics in algorithms.items():
+            minimum_recall = 0.8 if scenario == 'clear' else 0.6
+            if metrics['event_recall'] < minimum_recall:
+                failures.append(f'{scenario}/{algorithm}: event recall below {minimum_recall}')
+            if metrics['precision'] < 0.7:
+                failures.append(f'{scenario}/{algorithm}: point precision below 0.7')
+            if metrics['f1'] < 0.6:
+                failures.append(f'{scenario}/{algorithm}: point F1 below 0.6')
+    return failures
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description='Synthetic detection qualification; does not replace labeled field backtesting.')
+    parser.add_argument('--regression-only', action='store_true', help='Check historical regression limits only; NOT production acceptance.')
+    args = parser.parse_args()
     scenarios = {
         'clear': build_scenario(noise=0.8, spike=20, shift=14),
         'hard': build_scenario(noise=2.5, spike=12, shift=8),
     }
     results = {name: {algorithm: evaluate(algorithm, values) for algorithm in PROFILES} for name, values in scenarios.items()}
 
-    print('scenario algorithm   recall precision    f1   fp_rate warmup shift/onset throughput')
+    print('scenario algorithm   eRecall pPrecision pF1   fp_rate warmup shift/onset throughput')
     for scenario, algorithms in results.items():
         for algorithm, metrics in algorithms.items():
             print(
@@ -155,12 +177,16 @@ def main() -> int:
     if any(metrics['points_per_second'] < 10_000 for metrics in clear.values()):
         failures.append('clear: scorer throughput below 10k points/s')
 
+    if not args.regression_only:
+        failures.extend(production_quality_failures(results))
+
     if failures:
         for failure in failures:
             print(f'[FAIL] {failure}')
         return 1
 
-    print('[PASS] warm-up, clear-event recall, false-positive and throughput gates passed')
+    print('[PASS] historical regression limits only; NOT production acceptance' if args.regression_only
+          else '[PASS] synthetic qualification thresholds; labeled field-data acceptance still required')
     return 0
 
 

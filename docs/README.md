@@ -1,13 +1,19 @@
 # Documentation
 
-Current versions: plugin **1.5.0**, exporter **1.5.0**, API schema **3**.
+Current versions: plugin **1.5.0**, exporter **1.5.0**, API schema **3**; package revision **1.5.0-r1**.
 
 ## Start here
 
 - [Current v1.5.0 installation, configuration and upgrade guide - TR](../release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md)
 - [Matched packages and checksums](../release/README.md)
 - [Verified scope and remaining work](../release/STATUS_v1.5.0.md)
-- [GitHub v1.5.0 downloads](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0)
+- [GitHub v1.5.0-r1 downloads](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0-r1)
+- [Same-origin /anomalyalarm LB setup - TR](ANOMALYALARM_PROXY_TR.md)
+- [Current package verification and limits](RELEASE_1_5_0_R1_VERIFICATION.md)
+
+## Local retest review
+
+- [v1.5.0 independent retest, fixes and remaining quality limits - TR](V1_5_0_RETEST_FIX_REVIEW_TR.md) (historical test record; its fixes are included in r1)
 
 ## Historical references
 

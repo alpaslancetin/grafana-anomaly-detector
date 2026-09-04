@@ -1,5 +1,19 @@
 # Grafana Anomaly Detector v1.5.0 - Uctan Uca Kurulum, Upgrade ve Operasyon Kilavuzu
 
+Guncel dagitim **1.5.0-r1** paket revizyonudur. Plugin/exporter uygulama surumu
+**1.5.0** kalir. Komutlardaki ZIP adlari r1 paketlerine aittir. Orijinal v1.5.0
+release/tag degistirilmemistir. Paketlerin SHA-256 listesi ve her ZIP icindeki
+`BUILD_INFO.json`, dogru build'i ayirt etmenizi saglar.
+
+`/anomalyalarm` LB akisi icin [proxy kilavuzuna](../docs/ANOMALYALARM_PROXY_TR.md)
+bakiniz; exporter ZIP'inde ayni dokuman `ANOMALYALARM_PROXY_TR.md` adiyla bulunur.
+RHEL installer yeniden calistirildiginda mevcut `config.yml` ve `exporter.env`
+korunur. Yeni YAML sablonlari `CONFIG_ROOT/examples` altina kopyalanir; mevcut
+ayarlarinizi manuel karsilastirin. Installer custom INSTALL_ROOT/CONFIG_ROOT veya
+kullanici override'i kullaniyorsaniz systemd unit'in sabit yollarini da elle
+uyarlamaniz gerekir. Uninstall script'i config/state dahil verileri siler;
+upgrade icin uninstall kullanmayin, once yedek alin.
+
 Bu dokuman `Grafana Anomaly Detector v1.5.0` paketlerini sifirdan kurmak, mevcut kurulumu upgrade etmek, exporter'i ayaga kaldirmak, score feed akisini anlamak, alert olusturmak ve sorun gidermek icin hazirlandi.
 
 Okuyan kisi bu dokumanla su isleri tek basina yapabilmelidir:
@@ -33,13 +47,13 @@ Okuyan kisi bu dokumanla su isleri tek basina yapabilmelidir:
 Paket klasorunde bulunmasi gereken dosyalar:
 
 ```text
-grafana-anomaly-detector-plugin.zip
-grafana-anomaly-exporter-bundle-1.5.0.zip
+grafana-anomaly-detector-plugin-1.5.0-r1.zip
+grafana-anomaly-exporter-bundle-1.5.0-r1.zip
 GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_TR.md
 PACKAGE_CONTENTS_v1.5.0_TR.md
 README.md
 GITHUB_RELEASE_NOTES_v1.5.0.md
-SHA256SUMS_v1.5.0.txt
+SHA256SUMS_v1.5.0-r1.txt
 screenshots/
 ```
 
@@ -241,7 +255,7 @@ Neden:
 Paket:
 
 ```text
-grafana-anomaly-detector-plugin.zip
+grafana-anomaly-detector-plugin-1.5.0-r1.zip
 ```
 
 Custom `/data/grafana` ornegi:
@@ -250,7 +264,7 @@ Custom `/data/grafana` ornegi:
 mkdir -p /data/grafana/plugins/alpas-anomalydetector-panel
 rm -rf /data/grafana/plugins/alpas-anomalydetector-panel/*
 
-unzip grafana-anomaly-detector-plugin.zip \
+unzip grafana-anomaly-detector-plugin-1.5.0-r1.zip \
   -d /data/grafana/plugins/alpas-anomalydetector-panel
 ```
 
@@ -338,7 +352,7 @@ Portable mod test, POC ve custom process yonetimi icin en hizli yoldur.
 
 ```bash
 cd /data
-unzip grafana-anomaly-exporter-bundle-1.5.0.zip
+unzip grafana-anomaly-exporter-bundle-1.5.0-r1.zip
 cd grafana-anomaly-exporter-bundle
 ```
 
@@ -490,7 +504,7 @@ Production icin systemd onerilir.
 
 ```bash
 cd /data
-unzip grafana-anomaly-exporter-bundle-1.5.0.zip
+unzip grafana-anomaly-exporter-bundle-1.5.0-r1.zip
 cd grafana-anomaly-exporter-bundle
 ```
 
@@ -1045,7 +1059,7 @@ cp -a /data/grafana/conf/custom.ini \
 systemctl stop grafana-server
 
 rm -rf /data/grafana/plugins/alpas-anomalydetector-panel/*
-unzip grafana-anomaly-detector-plugin.zip \
+unzip grafana-anomaly-detector-plugin-1.5.0-r1.zip \
   -d /data/grafana/plugins/alpas-anomalydetector-panel
 
 systemctl start grafana-server
@@ -1073,7 +1087,7 @@ cd /data/grafana-anomaly-exporter-bundle
 
 cd /data
 mv grafana-anomaly-exporter-bundle grafana-anomaly-exporter-bundle.old.$TS
-unzip grafana-anomaly-exporter-bundle-1.5.0.zip
+unzip grafana-anomaly-exporter-bundle-1.5.0-r1.zip
 
 # eski config/state gerekiyorsa geri tasinir
 cp grafana-anomaly-exporter-bundle.old.$TS/exporter/config.yml \

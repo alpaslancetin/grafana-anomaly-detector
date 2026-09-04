@@ -103,6 +103,18 @@ class CaptureHandler(BaseHTTPRequestHandler):
 
 
 class MultiSinkExporterTest(unittest.TestCase):
+    def test_direct_rule_model_normalizes_direction_without_disabling_detection(self) -> None:
+        for value in ('both', 'upper', '', None, 'HIGH_MEAN'):
+            with self.subTest(direction=value):
+                rule = RuleConfig(name='direction', query='demo', anomaly_direction=value)
+                expected = 'high_mean' if value == 'HIGH_MEAN' else 'high_or_low'
+                self.assertEqual(rule.anomaly_direction, expected)
+                points = [RawPoint(time=float(i), value=100.0 if i < 12 else 160.0,
+                                   bucket_start=float(i), bucket_end=float(i), sample_count=1,
+                                   min_value=100.0 if i < 12 else 160.0, max_value=100.0 if i < 12 else 160.0)
+                          for i in range(13)]
+                self.assertTrue(score_points(rule, 'demo', {}, points)[-1].is_anomaly)
+
     def setUp(self) -> None:
         CaptureHandler.requests = []
         self.server = HTTPServer(('127.0.0.1', 0), CaptureHandler)

@@ -1,7 +1,9 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { cleanupIncidentFixture, installIncidentFixture } from './incident_fixture';
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(300000);
+test.afterEach(async ({ page }) => cleanupIncidentFixture(page));
 
 interface PanelExpectation {
   title: string;
@@ -190,7 +192,8 @@ async function verifyAutomationHandoffDefault(panel: Locator, expected: PanelExp
   }
 }
 
-test('all multi-sink demo panel buttons and target-specific alert queries work', async ({ page, context }) => {
+test('all multi-sink panel actions and queries work with deterministic incident frames', async ({ page, context }) => {
+  const fixtureFrames = await installIncidentFixture(page);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await gotoDashboard(page);
 
@@ -198,6 +201,9 @@ test('all multi-sink demo panel buttons and target-specific alert queries work',
   for (const expected of panels) {
     const panel = await visiblePanel(page, expected.title);
     const hasIncident = await clickFirstIncidentIfPresent(panel);
+    expect(hasIncident, `${expected.title}: deterministic incident must exercise the inspector`).toBe(true);
+    await expect(panel.getByRole('img', { name: 'Anomaly chart', exact: true })).toBeVisible();
+    await expect(panel.getByRole('img', { name: 'Detected incident overview', exact: true })).toBeVisible();
     if (hasIncident) {
       panelsWithIncidents += 1;
     }
@@ -205,13 +211,16 @@ test('all multi-sink demo panel buttons and target-specific alert queries work',
     await verifyAutomationHandoffDefault(panel, expected);
   }
 
-  expect(panelsWithIncidents).toBeGreaterThan(0);
+  expect(panelsWithIncidents).toBe(panels.length);
+  expect(fixtureFrames()).toBeGreaterThan(0);
 
   const rulesResponse = await page.request.get('http://127.0.0.1:9110/api/sync/rules');
   expect(rulesResponse.ok()).toBe(true);
   const rulesPayload = (await rulesResponse.json()) as { rules: Array<{ rule: string; query: string }> };
-  expect(rulesPayload.rules).toHaveLength(panels.length);
-  for (const rule of rulesPayload.rules) {
+  const expectedRuleNames = new Set(panels.map((panel) => `local_${panel.title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`));
+  const matrixRules = rulesPayload.rules.filter((rule) => expectedRuleNames.has(rule.rule));
+  expect(matrixRules).toHaveLength(panels.length);
+  for (const rule of matrixRules) {
     expect(rule.query).toContain('checkout_');
     expect(rule.query).not.toContain(rule.rule);
   }

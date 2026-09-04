@@ -1,11 +1,19 @@
 # Changelog
 
+## 1.5.0-r1 (2026-09-04; package revision)
+
+- Keep application version 1.5.0 while giving both ZIPs versioned names and build manifests.
+- Normalize unknown detection direction and show a configuration warning.
+- Observe chart size after delayed mounting, fit compact chart-only panels, and prevent time-axis caption overlap.
+- Ship the reviewed API diagnostics fixes with the matched exporter bundle and default/Prometheus/Influx YAML examples.
+- Record strict detection-quality and throughput limitations explicitly; no unconditional production approval.
+
 ## 1.5.0 (2026-09-03)
 
 - Added Elastic-style anomaly direction controls for high-mean, low-mean, and two-sided deviations.
 - Added decision floors, minimum activity, N-of-M persistence, and degraded-data blocking to Advanced tuning and recommended presets.
 - Added exporter API capability negotiation and actionable diagnostics for empty, HTML, metrics, proxy, and CORS failures.
-- Added deterministic scope-aware score-feed registration compatible with the exporter v2 contract.
+- Added deterministic scope-aware score-feed registration compatible with exporter API schema 3.
 - Added interactive legend isolation/hiding, full scrollable series lists, and chart-only responsive reflow without changing score-feed coverage.
 - Added recovery hysteresis, recovery-bucket, and cooldown controls with visible candidate/open/recovering decision states.
 - Added searchable/sortable high-cardinality legends and target-specific active-incident alert queries.

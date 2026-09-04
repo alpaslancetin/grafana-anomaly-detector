@@ -1,6 +1,16 @@
 # Grafana Anomaly Detector v1.5.0
 
-This release makes anomaly decisions direction-aware and hardens the plugin-to-exporter score-feed contract for continuous alerting.
+Current package revision: **v1.5.0-r1**. Plugin/exporter application version remains **1.5.0**, API schema **3**. This release makes anomaly decisions direction-aware and hardens the plugin-to-exporter score-feed contract for continuous alerting.
+
+## Post-release fixes included in r1
+
+- Unknown-direction fallback is consistent in panel/exporter; the panel exposes a configuration warning.
+- Invalid DELETE panel IDs receive structured JSON 400; browser-visible request/version headers aid proxy diagnostics.
+- Compact charts attach resize observation after data arrives, fit their containers and separate time labels from the axis caption.
+- Corrected point-F1 and explicitly separated strict detection quality from historical regression checks.
+- Versioned plugin/exporter ZIP names, build manifests, ready-to-edit Prometheus/Influx YAML samples, and [same-origin LB guidance](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/docs/ANOMALYALARM_PROXY_TR.md).
+
+Strict synthetic detection quality still has open findings, especially hard seasonal cases; this is not unconditional production acceptance. See [retest details](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/docs/V1_5_0_RETEST_FIX_REVIEW_TR.md).
 
 ## Highlights
 
@@ -41,13 +51,19 @@ The plugin is unsigned. This release retains the custom SVG chart; native Grafan
 
 See the [current scope report](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/STATUS_v1.5.0.md) and [installation guide](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md). Historical PDFs and screenshots are references, not a v1.5.0 visual acceptance baseline.
 
-The published v1.5.0 tag and binary ZIPs retain their original checksums. Subsequent documentation clarifications on main do not change the release's scoring implementation.
+The original v1.5.0 tag and ZIPs retain their original checksums. This separate v1.5.0-r1 release contains the reviewed fixes; use its new checksums and build manifests. The application version remains 1.5.0 by request; the package revision distinguishes the builds.
 
 ## Assets
 
-- `grafana-anomaly-detector-plugin.zip`
-- `grafana-anomaly-exporter-bundle-1.5.0.zip`
-- `SHA256SUMS_v1.5.0.txt`
+- `grafana-anomaly-detector-plugin-1.5.0-r1.zip`
+- `grafana-anomaly-exporter-bundle-1.5.0-r1.zip`
+- `SHA256SUMS_v1.5.0-r1.txt`
 - `GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md`
 - `PACKAGE_CONTENTS_v1.5.0_TR.md`
-- `STATUS_v1.5.0.md` (current documentation clarification; not part of the original binary build)
+- `STATUS_v1.5.0.md`
+- `RELEASE_1_5_0_R1_VERIFICATION.md` (test results and explicit quality/performance limitations)
+
+Validation: plugin 35/35, exporter 44/44 on Python 3.12 and 3.9.25, 3,801 parity points,
+browser suite 19 passed/1 skipped on Grafana 12.4.0. The strict detection gate remains
+failed; this session also missed the historical 10k points/s throughput floor.
+See the [verification record](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/docs/RELEASE_1_5_0_R1_VERIFICATION.md). Do not interpret this maintenance release as unconditional production acceptance.

@@ -2,8 +2,12 @@
 
 ## Paketler
 
-- `grafana-anomaly-detector-plugin.zip`: Plugin ID `alpas-anomalydetector-panel`, surum `1.5.0`, minimum Grafana `11.6.7`.
-- `grafana-anomaly-exporter-bundle-1.5.0.zip`: Exporter `1.5.0`, minimum Python `3.9`, portable ve RHEL kurulum dosyalari.
+Guncel paket revizyonu **1.5.0-r1**; uygulama surumleri **1.5.0** kalir.
+Her ZIP icindeki `BUILD_INFO.json`, kaynak commit ve dosya hash bilgilerini tasir.
+Orijinal v1.5.0 paketleri tarihi GitHub release altinda korunur.
+
+- `grafana-anomaly-detector-plugin-1.5.0-r1.zip`: Plugin ID `alpas-anomalydetector-panel`, surum `1.5.0`, minimum Grafana `11.6.7`.
+- `grafana-anomaly-exporter-bundle-1.5.0-r1.zip`: Exporter `1.5.0`, minimum Python `3.9`, portable ve RHEL kurulum dosyalari.
 
 ## Hazir konfigurasyonlar
 
@@ -25,8 +29,15 @@ Prometheus yalniz Prometheus kaynak veya hedef secildiginde gerekir. InfluxDB, L
 
 ## Baslangic
 
+Python 3.9+ gereklidir. YAML dosyalari paket icinde bulunur; endpoint/query
+alanlarini ortamina gore duzenle. InfluxDB 2.x ornegi icin source ve sink tokenlarini
+environment ile ver, ayri source/score bucket kullan. Prometheus zorunlu degildir.
+PostgreSQL kullaniliyorsa `exporter/requirements-postgresql.txt` istege bagli ek bagimliliktir.
+`./portable-exporter.sh validate` konfigurasyon kontroludur; kaynak erisimi kaniti degildir.
+LB uzerinden `/anomalyalarm` icin paket icindeki `ANOMALYALARM_PROXY_TR.md` dosyasina bak.
+
 ```bash
-unzip grafana-anomaly-exporter-bundle-1.5.0.zip
+unzip grafana-anomaly-exporter-bundle-1.5.0-r1.zip
 cd grafana-anomaly-exporter-bundle
 vi exporter/config.yml
 ANOMALY_PYTHON_BIN=$(command -v python3.9) ./portable-exporter.sh validate
@@ -41,7 +52,7 @@ Uretimde `cors_allowed_origins`, `allowed_datasource_hosts` ve gerekirse `api_to
 ## Kontrol
 
 ```bash
-sha256sum -c SHA256SUMS_v1.5.0.txt
+sha256sum -c SHA256SUMS_v1.5.0-r1.txt
 curl -fsS http://127.0.0.1:9110/health
 curl -fsS http://127.0.0.1:9110/health/ready
 curl -fsS http://127.0.0.1:9110/health/dependencies

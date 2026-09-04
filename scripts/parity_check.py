@@ -132,6 +132,13 @@ def build_cases() -> list[dict[str, Any]]:
     ]
     for algorithm in ['zscore', 'mad', 'ewma', 'seasonal', 'level_shift']:
         cases.append({'name': f'{algorithm}_deterministic', 'points': deterministic_points(), 'options': {**base_options, 'algorithm': algorithm}})
+    for index, direction in enumerate(['both', 'upper', '', 'HIGH_MEAN', None]):
+        for value in (160.0, 40.0):
+            cases.append({
+                'name': f'mad_direction_normalization_{index}_{int(value)}',
+                'points': directional_shift_points(value),
+                'options': {**base_options, 'algorithm': 'mad', 'anomalyDirection': direction},
+            })
     return cases
 
 
@@ -165,7 +172,7 @@ def run_py(cases: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
             name=item['name'],
             query='parity_fixture',
             algorithm=options['algorithm'],
-            anomaly_direction=str(options.get('anomalyDirection', 'high_or_low')),
+            anomaly_direction=options.get('anomalyDirection', 'high_or_low'),
             minimum_absolute_deviation=float(options.get('minimumAbsoluteDeviation', 0.0)),
             minimum_relative_deviation=float(options.get('minimumRelativeDeviation', 0.0)),
             minimum_activity=float(options.get('minimumActivity', 0.0)),

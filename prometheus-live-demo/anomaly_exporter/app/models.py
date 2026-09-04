@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+import logging
 import sys
 from typing import Any, DefaultDict, Deque, Dict
 SeverityThresholds = Dict[str, int]
@@ -79,6 +80,16 @@ class RuleConfig:
     legend: str = ''
     labels: dict[str, str] = field(default_factory=dict)
     description: str = ''
+
+    def __post_init__(self) -> None:
+        normalized = self.anomaly_direction.strip().lower() if isinstance(self.anomaly_direction, str) else ''
+        if normalized not in SUPPORTED_ANOMALY_DIRECTIONS:
+            if self.anomaly_direction is not None:
+                logging.getLogger('grafana_anomaly_exporter').warning(
+                    'Unsupported anomaly_direction in rule model; using high_or_low. Review rule configuration.'
+                )
+            normalized = 'high_or_low'
+        self.anomaly_direction = normalized
 
     @property
     def history_limit(self) -> int:

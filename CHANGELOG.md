@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0-r1 (package revision; application version remains 1.5.0)
+
+- Publish the reviewed post-release fixes with versioned plugin/exporter ZIP names and per-file build manifests. The original v1.5.0 tag/assets remain unchanged.
+- Normalize unknown anomaly direction consistently in panel/exporter and display a panel configuration warning.
+- Return a clean JSON 400 for invalid panel deletion IDs; expose diagnostic request/version headers to browsers.
+- Attach chart resize observation after delayed mounting, fit compact chart-only panels, and separate time ticks from the axis caption.
+- Correct point-F1 reporting and distinguish the strict quality gate from the historical regression check. Strict synthetic detection quality still has open findings; this revision is not unconditional production acceptance.
+- Include validated default, Prometheus and InfluxDB YAML configurations, empty distribution state, and same-origin /anomalyalarm proxy guidance.
+
 ## 1.5.0
 
 - Added user-configurable Elastic-style `high_mean`, `low_mean`, and `high_or_low` anomaly direction policies with identical panel and exporter behavior.

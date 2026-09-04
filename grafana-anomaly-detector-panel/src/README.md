@@ -1,13 +1,13 @@
 # Grafana Anomaly Detector
 
-Plugin version: **1.5.0**. Plugin ID: `alpas-anomalydetector-panel`.
+Plugin version: **1.5.0**. Package revision: **1.5.0-r1**. Plugin ID: `alpas-anomalydetector-panel`.
 
 Analyze numeric time-series with z-score, rolling MAD, EWMA, seasonal, or level-shift detection. Inspect expected bands, severity, confidence, data quality, and incident details.
 
 ## Install
 
-1. Download the plugin ZIP from the [v1.5.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0).
-2. Extract its contents into `<grafana-plugins>/alpas-anomalydetector-panel/`.
+1. Download `grafana-anomaly-detector-plugin-1.5.0-r1.zip` from the [v1.5.0-r1 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0-r1) and verify its checksum.
+2. Extract the ZIP into `<grafana-plugins>/`; it already contains the `alpas-anomalydetector-panel/` directory. Avoid nesting that directory twice.
 3. This build is unsigned. Add `allow_loading_unsigned_plugins = alpas-anomalydetector-panel` under `[plugins]` in the active Grafana configuration.
 4. Restart Grafana, refresh the browser, and choose Anomaly Detector as the panel visualization.
 
@@ -29,3 +29,7 @@ Targets are Prometheus metrics, Loki, InfluxDB, PostgreSQL, ClickHouse, and Elas
 - [Verified release scope and remaining work](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/release/STATUS_v1.5.0.md)
 
 The chart uses custom SVG. Native Time Series multi-axis, zoom/pan and shared-cursor parity is not complete.
+
+BUILD_INFO.json identifies the source commit and hashes for this package revision.
+Strict synthetic quality and capacity qualification remain open; see the
+[r1 test record](https://github.com/alpaslancetin/grafana-anomaly-detector/blob/main/docs/RELEASE_1_5_0_R1_VERIFICATION.md).

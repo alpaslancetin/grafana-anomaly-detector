@@ -1,18 +1,18 @@
 # Release packages
 
-This folder contains the current `Grafana Anomaly Detector v1.5.0` release set. Historical packages and their original checksums remain on the [v1.4.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.4.0); do not use old checksums with the current unversioned plugin ZIP.
+This folder contains package revision `1.5.0-r1` of plugin/exporter `1.5.0`. Both ZIP names are versioned. Original packages and checksums remain on the [v1.5.0 release](https://github.com/alpaslancetin/grafana-anomaly-detector/releases/tag/v1.5.0); do not use their checksums with r1 packages.
 
 ## Artifacts
 
-- `grafana-anomaly-detector-plugin.zip`: Grafana panel plugin.
-- `grafana-anomaly-exporter-bundle-1.5.0.zip`: portable and RHEL exporter bundle.
+- `grafana-anomaly-detector-plugin-1.5.0-r1.zip`: Grafana panel plugin.
+- `grafana-anomaly-exporter-bundle-1.5.0-r1.zip`: portable and RHEL exporter bundle.
 - `GITHUB_RELEASE_NOTES_v1.5.0.md`: GitHub release description.
 - `GRAFANA_ANOMALY_DETECTOR_E2E_KURULUM_UPGRADE_KILAVUZU_v1.5.0_TR.md`: end-to-end Turkish guide.
 - `PACKAGE_CONTENTS_v1.5.0_TR.md`: package contents and operational notes.
-- `SHA256SUMS_v1.5.0.txt`: release integrity checksums.
+- `SHA256SUMS_v1.5.0-r1.txt`: release integrity checksums.
 - [STATUS_v1.5.0.md](STATUS_v1.5.0.md): verified coverage, chart limitations, and remaining production qualification.
 
-The published tag and binary ZIPs are immutable for this documentation update. The current `main` documentation clarifies their scope without changing scoring code or replacing the tested packages.
+This is a code/package revision, not just documentation. The original v1.5.0 tag and assets are not replaced. The v1.5.0-r1 release points to the revised source and packages. Each ZIP contains `BUILD_INFO.json` with the source commit and per-file SHA-256 values. Rebuild using `python scripts/build_release.py` after the production plugin build; do not include runtime state or local QA output.
 
 ## Compatibility
 
@@ -30,7 +30,7 @@ The exporter zip now contains a ready-to-run `exporter/config.yml` plus two edit
 Prometheus source:
 
 ```bash
-unzip grafana-anomaly-exporter-bundle-1.5.0.zip
+unzip grafana-anomaly-exporter-bundle-1.5.0-r1.zip
 cd grafana-anomaly-exporter-bundle
 cp exporter/examples/config.prometheus.yml exporter/config.yml
 vi exporter/config.yml
@@ -57,7 +57,7 @@ The exporter API uses schema `3`. It supports lifecycle-aware decisions, explici
 ## Validation
 
 ```bash
-sha256sum -c SHA256SUMS_v1.5.0.txt
+sha256sum -c SHA256SUMS_v1.5.0-r1.txt
 curl -fsS http://127.0.0.1:9110/health
 curl -fsS http://127.0.0.1:9110/health/ready
 curl -fsS http://127.0.0.1:9110/health/dependencies

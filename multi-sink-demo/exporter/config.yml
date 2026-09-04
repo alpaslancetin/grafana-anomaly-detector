@@ -66,19 +66,21 @@ sinks:
     timeout_seconds: 5
 
 rules:
+  # Demo pulses last 16-18 seconds. Preserve 5-second samples and single-bucket
+  # decisions; the production recommended profile remains 3-of-4.
   - name: checkout_latency
     description: Alert-ready anomaly score for checkout latency.
     query: demo_latency_ms{service="checkout",environment="demo"}
     source_type: prometheus
     range_seconds: 3600
-    step_seconds: 30
-    bucket_span_seconds: 60
+    step_seconds: 5
+    bucket_span_seconds: 0
     algorithm: mad
     anomaly_direction: high_mean
     threshold: 4.0
     baseline_window: 12
-    persistence_buckets: 3
-    persistence_window: 4
+    persistence_buckets: 1
+    persistence_window: 1
     recovery_threshold: 3.0
     recovery_buckets: 2
     cooldown_buckets: 2
@@ -94,15 +96,15 @@ rules:
     query: demo_requests_per_second{service="checkout",environment="demo"}
     source_type: prometheus
     range_seconds: 3600
-    step_seconds: 30
-    bucket_span_seconds: 60
+    step_seconds: 5
+    bucket_span_seconds: 0
     algorithm: ewma
     anomaly_direction: high_or_low
-    threshold: 4.5
+    threshold: 3.5
     baseline_window: 14
-    persistence_buckets: 3
-    persistence_window: 4
-    recovery_threshold: 3.375
+    persistence_buckets: 1
+    persistence_window: 1
+    recovery_threshold: 2.625
     recovery_buckets: 2
     cooldown_buckets: 2
     data_quality_gate: true
@@ -117,14 +119,14 @@ rules:
     query: demo_error_rate_percent{service="checkout",environment="demo"}
     source_type: prometheus
     range_seconds: 3600
-    step_seconds: 30
-    bucket_span_seconds: 60
+    step_seconds: 5
+    bucket_span_seconds: 0
     algorithm: mad
     anomaly_direction: high_mean
     threshold: 4.2
     baseline_window: 18
-    persistence_buckets: 3
-    persistence_window: 4
+    persistence_buckets: 1
+    persistence_window: 1
     recovery_threshold: 3.375
     recovery_buckets: 2
     cooldown_buckets: 2

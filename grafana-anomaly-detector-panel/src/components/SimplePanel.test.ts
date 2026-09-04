@@ -10,6 +10,7 @@ import {
   ANOMALY_THRESHOLD_MAX,
   ANOMALY_THRESHOLD_MIN,
   ANOMALY_THRESHOLD_STEP,
+  resolveAnomalyDirection,
 } from '../types';
 import { __testables } from './SimplePanel';
 
@@ -33,6 +34,15 @@ const {
 } = __testables;
 
 describe('SimplePanel helpers', () => {
+  it('warns for unsupported persisted directions and normalizes before feed registration', () => {
+    for (const value of ['both', 'upper', '', 'typo']) {
+      expect(resolveAnomalyDirection(value)).toMatchObject({ direction: 'high_or_low', warning: expect.stringContaining('Unsupported') });
+      const resolved = __testables.resolveOptions({ setupMode: 'advanced', anomalyDirection: value } as any, []);
+      expect(resolved.anomalyDirection).toBe('high_or_low');
+    }
+    expect(resolveAnomalyDirection(' HIGH_MEAN ')).toEqual({ direction: 'high_mean', warning: null });
+    expect(resolveAnomalyDirection(null)).toEqual({ direction: 'high_or_low', warning: null });
+  });
   it('selects low-mean direction only for explicit decrease-sensitive metric semantics', () => {
     expect(detectAutoAnomalyDirection(['service_availability_percent'])).toBe('low_mean');
     expect(detectAutoAnomalyDirection(['login_success_rate'])).toBe('low_mean');

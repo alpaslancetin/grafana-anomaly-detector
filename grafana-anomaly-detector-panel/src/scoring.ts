@@ -1,4 +1,4 @@
-import { AnomalyDirection, BucketSpan, DetectionAlgorithm, SeasonalRefinement, SeverityPreset } from './types';
+import { AnomalyDirection, BucketSpan, DetectionAlgorithm, resolveAnomalyDirection, SeasonalRefinement, SeverityPreset } from './types';
 
 export type SeverityLabel = 'normal' | 'low' | 'medium' | 'high' | 'critical';
 export type ConfidenceLabel = 'low' | 'medium' | 'high';
@@ -701,7 +701,7 @@ export const analyzePoints = (points: RawPoint[], options: ScoringOptions): Samp
       break;
   }
 
-  const direction = options.anomalyDirection ?? 'high_or_low';
+  const direction = resolveAnomalyDirection(options.anomalyDirection).direction;
   const minimumAbsoluteDeviation = Math.max(0, options.minimumAbsoluteDeviation ?? 0);
   const minimumRelativeDeviation = Math.max(0, options.minimumRelativeDeviation ?? 0);
   const minimumActivity = Math.max(0, options.minimumActivity ?? 0);

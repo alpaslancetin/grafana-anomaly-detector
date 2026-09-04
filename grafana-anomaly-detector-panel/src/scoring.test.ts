@@ -90,6 +90,12 @@ describe('canonical anomaly scoring', () => {
     expect(lowBlocked.severityLabel).toBe('normal');
   });
 
+  it.each(['both', 'upper', '', 'HIGH_MEAN'])('does not silently mute an upward anomaly for direction %j', (direction) => {
+    const points = [...Array.from({ length: 12 }, (_, index) => buildRawPoint(index, 100)), buildRawPoint(12, 160)];
+    const result = analyzePoints(points, { ...baseOptions, anomalyDirection: direction as any });
+    expect(result.at(-1)?.isAnomaly).toBe(true);
+  });
+
   it('requires the configured N-of-M persistence and deviation floors', () => {
     const points = [
       ...Array.from({ length: 12 }, (_, index) => buildRawPoint(index, 100)),

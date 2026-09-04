@@ -81,6 +81,7 @@ class TransportContractTests(unittest.TestCase):
             self.assertIn('idempotentSync', payload['features'])
             self.assertIn('decisionLifecycle', payload['features'])
             self.assertEqual(headers['X-Anomaly-Schema-Version'], '3')
+            self.assertIn('X-Request-ID', headers.get('Access-Control-Expose-Headers', ''))
 
             status, _, body = self.request(f'{prefix}/health/ready')
             self.assertEqual(status, 200)
@@ -157,6 +158,15 @@ class TransportContractTests(unittest.TestCase):
         )
         self.assertEqual(status, 429)
         self.assertEqual(json.loads(body)['error']['code'], 'rate_limited')
+
+    def test_delete_rejects_invalid_panel_ids_with_a_field_message(self) -> None:
+        for panel_id in ('notanumber', '', '-1', '1.5', '0'):
+            with self.subTest(panel_id=panel_id):
+                status, _, body = self.request(
+                    f'/api/sync/panel?dashboardUid=demo&panelId={panel_id}', method='DELETE'
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(json.loads(body)['error']['message'], 'panelId must be a positive integer.')
 
     def test_datasource_redirect_cannot_escape_validated_origin(self) -> None:
         request = Request('http://datasource.internal:8080/query')
